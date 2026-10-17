@@ -1,0 +1,29 @@
+{
+  "name": "rios-inundaciones-usa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env ./node_modules/astro/bin/astro.mjs dev",
+    "build": "astro build",
+    "start": "node --env-file-if-exists=.env ./dist/server/entry.mjs",
+    "check": "astro check",
+    "db:schema": "tsx --env-file-if-exists=.env scripts/db-schema.ts",
+    "ingest:meta": "tsx --env-file-if-exists=.env scripts/ingest/metadata.ts",
+    "ingest:levels": "tsx --env-file-if-exists=.env scripts/ingest/levels.ts",
+    "ingest:alerts": "tsx --env-file-if-exists=.env scripts/ingest/alerts.ts",
+    "ingest:forecasts": "tsx --env-file-if-exists=.env scripts/ingest/forecasts.ts"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.7",
+    "@fontsource-variable/public-sans": "^5.3.0",
+    "@fontsource/big-shoulders-display": "^5.3.0",
+    "astro": "^7.3.8",
+    "mysql2": "^3.24.6",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

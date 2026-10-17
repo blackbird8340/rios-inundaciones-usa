@@ -1,0 +1,23 @@
+export function slugify(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// "Ohio River at Pittsburgh" → { river: "Ohio River", place: "Pittsburgh" }.
+// NWPS usa casi siempre "<río> at|near|below|above <lugar>".
+export function splitGaugeName(name: string): { river: string; place: string | null } {
+  const m = name.match(/^(.*?)\s+(?:at|near|nr|below|blw|above|abv)\s+(.+)$/i);
+  if (!m) return { river: name.trim(), place: null };
+  return { river: m[1].trim(), place: m[2].trim() };
+}
+
+export function gaugeSlug(name: string, id: string): string {
+  const { river, place } = splitGaugeName(name);
+  const base = place ? `${slugify(river)}-at-${slugify(place)}` : slugify(river);
+  return `${base}-${id.toLowerCase()}`;
+}

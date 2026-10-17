@@ -1,0 +1,93 @@
+:root {
+  --paper: #eef2f3;
+  --card: #ffffff;
+  --ink: #10243a;
+  --muted: #586a78;
+  --rule: #cbd5da;
+  --water: #2f6f8f;
+  --water-tint: #d6e6ee;
+  --water-deep: #1d4e68;
+  /* Colores oficiales de categorías NWS */
+  --cat-normal: #00c853;
+  --cat-action: #ffff00;
+  --cat-minor: #ff9900;
+  --cat-moderate: #ff0000;
+  --cat-major: #cc33ff;
+  --cat-no_data: #9e9e9e;
+
+  --display: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+  --body: 'Public Sans Variable', system-ui, sans-serif;
+  --gutter: clamp(1rem, 4vw, 2rem);
+  --measure: 72rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--body);
+  font-variant-numeric: tabular-nums;
+}
+
+a { color: var(--water-deep); text-underline-offset: 0.15em; }
+a:hover { color: var(--ink); }
+:focus-visible { outline: 3px solid var(--water); outline-offset: 2px; border-radius: 2px; }
+
+h1, h2, h3 { line-height: 1.1; margin: 0; }
+h2 {
+  font: 700 1.6rem/1.1 var(--display);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+p { margin: 0; }
+
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 1rem; top: 1rem; background: var(--card); padding: 0.5rem 1rem; z-index: 10; }
+
+.site-header, main, .site-footer {
+  max-width: var(--measure);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1.25rem;
+  padding-block: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+.brand {
+  font: 800 1.35rem/1 var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.crumbs { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0; padding: 0; font-size: 0.875rem; color: var(--muted); }
+.crumbs li + li::before { content: '/'; margin-right: 0.4rem; color: var(--rule); }
+.crumbs a { color: var(--muted); }
+
+.site-footer {
+  margin-top: 4rem;
+  padding-block: 2rem 3rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.875rem;
+  color: var(--muted);
+  display: grid;
+  gap: 0.75rem;
+}
+.site-footer .disclaimer { color: var(--ink); }
+
+.muted { color: var(--muted); }
+.small { font-size: 0.875rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -1,0 +1,21 @@
+---
+import Base from '../layouts/Base.astro';
+import { listGauges } from '../lib/queries.ts';
+import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
+import { ft } from '../lib/format.ts';
+
+const gauges = await listGauges();
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+---
+<Base title="River levels and flood stages" description="Current river levels, flood stages and NWS forecasts." canonicalPath="/">
+  <h1 class="h">River gauges</h1>
+  <ul class="list">
+    {gauges.map((g) => (
+      <li><a href={`/gauge/${g.slug}/`}>{g.name}, {g.state_code}</a> <span class="muted">{ft(g.stage_ft)} · {STATUS_META[g.status as FloodStatus].label}</span></li>
+    ))}
+  </ul>
+</Base>
+<style>
+  .h { font: 800 2.5rem/1 var(--display); text-transform: uppercase; margin: 2rem 0 1rem; }
+  .list { display: grid; gap: 0.5rem; padding-left: 1.2rem; }
+</style>

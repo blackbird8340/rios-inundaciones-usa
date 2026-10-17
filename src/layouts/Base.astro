@@ -1,0 +1,51 @@
+---
+import '@fontsource-variable/public-sans';
+import '@fontsource/big-shoulders-display/latin-700';
+import '@fontsource/big-shoulders-display/latin-800';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  canonicalPath: string;
+  jsonLd?: object[];
+  noindex?: boolean;
+}
+const { title, description, canonicalPath, jsonLd = [], noindex = false } = Astro.props;
+const siteName = process.env.SITE_NAME || 'River Levels';
+const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={origin + canonicalPath} />
+    {noindex && <meta name="robots" content="noindex" />}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#10243a" />
+    {jsonLd.map((d) => <script type="application/ld+json" set:html={JSON.stringify(d)} />)}
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="/">{siteName}</a>
+      <slot name="crumbs" />
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p class="disclaimer">
+        <strong>Not an official warning system.</strong> Follow National Weather Service warnings and local emergency officials.
+        For life-threatening flooding, call 911. Official forecasts: <a href="https://water.noaa.gov/">water.noaa.gov</a> ·
+        Warnings: <a href="https://www.weather.gov/">weather.gov</a>.
+      </p>
+      <p>Data: USGS, NOAA/NWS. Real-time USGS data is provisional and subject to revision. {siteName} is not affiliated with USGS or NOAA.</p>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,263 @@
+---
+import Base from '../../layouts/Base.astro';
+import FloodLadder from '../../components/FloodLadder.astro';
+import StageChart from '../../components/StageChart.astro';
+import { getGaugePage } from '../../lib/queries.ts';
+import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
+import { ago, cfs, fmtDate, fmtTime, ft, ianaZone } from '../../lib/format.ts';
+import { STALE_AFTER_MIN } from '../../lib/config.ts';
+
+const data = await getGaugePage(Astro.params.slug!);
+if (!data) return new Response('Gauge not found', { status: 404 });
+const { gauge: g, impacts, crests, observations, forecast, alerts, alertsCheckedAt, upstream, downstream, lastObservation } = data;
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+
+const tz = ianaZone(g.time_zone);
+const cats = { action_ft: g.action_ft, minor_ft: g.minor_ft, moderate_ft: g.moderate_ft, major_ft: g.major_ft };
+// gauges.stage_ft queda en null si el último dato tiene más de un día; ahí mostramos el último que haya.
+const stage: number | null = g.stage_ft ?? lastObservation?.stage_ft ?? null;
+const observedAt: Date | null = g.observed_at ?? lastObservation?.observed_at ?? null;
+const status = (g.stage_ft != null ? g.status : 'no_data') as FloodStatus;
+const minutesOld = observedAt ? (Date.now() - observedAt.getTime()) / 60_000 : Infinity;
+const stale = minutesOld > STALE_AFTER_MIN;
+const record = crests[0] ?? null;
+const placeLabel = `${g.place_name ?? g.name}, ${g.state_code}`;
+const river = g.river_name ?? g.name;
+
+// Respuesta directa en una línea: dónde está el río respecto de la próxima categoría.
+function answer(): string {
+  if (stage == null) return 'No recent reading from this gauge.';
+  const trend = g.trend === 'rising' ? ' and rising' : g.trend === 'falling' ? ' and falling' : g.trend === 'steady' ? ' and steady' : '';
+  const ladder = [
+    ['action stage', g.action_ft], ['flood stage', g.minor_ft], ['moderate flood stage', g.moderate_ft], ['major flood stage', g.major_ft],
+  ].filter(([, v]) => v != null) as [string, number][];
+  const next = ladder.find(([, v]) => stage < v);
+  const passed = ladder.filter(([, v]) => stage >= v).at(-1);
+  if (!ladder.length) return `${ft(stage, 2)}${trend}.`;
+  if (passed && status !== 'action') return `${ft(stage, 2)}${trend}: ${(stage - passed[1]).toFixed(1)} ft above ${passed[0]} (${passed[1]} ft).`;
+  if (next) return `${ft(stage, 2)}${trend}, ${(next[1] - stage).toFixed(1)} ft below ${next[0]} (${next[1]} ft).`;
+  return `${ft(stage, 2)}${trend}.`;
+}
+const answerText = answer();
+
+const fcIssued = forecast[0]?.issued_at ?? null;
+const crestStatus = g.forecast_crest_ft != null ? statusFor(g.forecast_crest_ft, cats) : 'no_data';
+const alertsFresh = alertsCheckedAt && Date.now() - alertsCheckedAt.getTime() < 45 * 60_000;
+const nwsUrl = g.lid ? `https://water.noaa.gov/gauges/${g.lid.toLowerCase()}` : null;
+const usgsUrl = g.usgs_id ? `https://waterdata.usgs.gov/monitoring-location/${g.usgs_id}/` : null;
+const vsRecord = stage != null && record ? record.stage_ft - stage : null;
+
+const title = `${g.name}, ${g.state_code} River Level Today – Flood Stage & Forecast`;
+const description = stage != null
+  ? `${g.name} is at ${ft(stage, 1)} (${STATUS_META[status].label.toLowerCase()}). Live level, 7-day chart, NWS forecast, flood stages and what floods at each level.`
+  : `${g.name} river gauge: flood stages, historic crests, NWS forecast and what floods at each level.`;
+const path = `/gauge/${g.slug}/`;
+const crumbs = [
+  { name: g.state_name, href: `/${g.state_slug}/` },
+  ...(g.river_slug ? [{ name: river, href: `/river/${g.river_slug}/` }] : []),
+  { name: g.place_name ?? g.name, href: path },
+];
+const jsonLd = [{
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: c.href })),
+}];
+---
+<Base title={title} description={description} canonicalPath={path} jsonLd={jsonLd} noindex={minutesOld > 30 * 1440}>
+  <ol class="crumbs" slot="crumbs">
+    {crumbs.map((c) => <li><a href={c.href}>{c.name}</a></li>)}
+  </ol>
+
+  <section class="hero" style={`--status: var(--cat-${status})`}>
+    <p class="eyebrow">River level · {g.county_name ? `${g.county_name} County, ` : ''}{g.state_name}</p>
+    <h1>{g.name}</h1>
+    <p class="answer">{answerText}</p>
+    <p class="status-line">
+      <span class:list={['pill', `pill--${status}`]}>{STATUS_META[status].label}</span>
+      {observedAt && (
+        <span class:list={['when', { stale }]}>
+          {stale ? `Last reading ${ago(observedAt)} — data may be out of date.` : `Reading at ${fmtTime(observedAt, tz)}`}
+        </span>
+      )}
+    </p>
+    <dl class="facts">
+      <div><dt>Flow</dt><dd>{cfs(g.flow_cfs ?? lastObservation?.flow_cfs)}</dd></div>
+      <div><dt>Flood stage</dt><dd>{ft(g.minor_ft, 0)}</dd></div>
+      {g.has_forecast ? (
+        <div>
+          <dt>Forecast high</dt>
+          <dd>
+            {g.forecast_crest_ft != null ? <>{ft(g.forecast_crest_ft)} <span class="muted small">{fmtTime(g.forecast_crest_at, tz, true)}</span></> : '—'}
+            {crestStatus !== 'normal' && crestStatus !== 'no_data' && <span class:list={['pill', 'pill--sm', `pill--${crestStatus}`]}>{STATUS_META[crestStatus].label}</span>}
+          </dd>
+        </div>
+      ) : (
+        <div><dt>Forecast</dt><dd class="muted small">NWS doesn't issue forecasts for this gauge</dd></div>
+      )}
+      {vsRecord != null && record && (
+        <div><dt>Record crest</dt><dd>{ft(record.stage_ft)} <span class="muted small">{new Date(record.occurred_at).getUTCFullYear()}</span></dd></div>
+      )}
+    </dl>
+  </section>
+
+  <section class="alerts" aria-labelledby="alerts-h">
+    <h2 id="alerts-h" class="visually-hidden">Flood alerts</h2>
+    {!alertsFresh ? (
+      <p class="alert-note">We couldn't load current flood alerts. Check <a href="https://www.weather.gov/">weather.gov</a> for warnings in {g.county_name ?? 'this'} County.</p>
+    ) : alerts.length ? (
+      alerts.map((a) => (
+        <article class="alert">
+          <p class="alert-event">{a.event}</p>
+          <p class="alert-headline">{a.headline}</p>
+          <p class="small muted">{a.area_desc}{a.expires_at && <> · Until {fmtTime(a.ends_at ?? a.expires_at, tz, true)}</>}</p>
+          <details>
+            <summary>Full alert text</summary>
+            <pre>{a.description}</pre>
+            {a.instruction && <pre>{a.instruction}</pre>}
+          </details>
+        </article>
+      ))
+    ) : (
+      <p class="alert-note">No active flood alerts for {g.county_name ?? 'this'} County. <span class="muted">Checked {fmtTime(alertsCheckedAt, tz)}.</span></p>
+    )}
+  </section>
+
+  <div class="layout">
+    <section class="ladder-col" aria-labelledby="ladder-h">
+      <h2 id="ladder-h">What floods at each level</h2>
+      <p class="lede muted">National Weather Service impact statements for this gauge. The shaded part is under water at the current level.</p>
+      {impacts.length || g.action_ft != null ? (
+        <FloodLadder categories={cats} impacts={impacts} stage={stage} trend={g.trend} forecastCrest={g.forecast_crest_ft} record={record} />
+      ) : (
+        <p class="muted">The National Weather Service hasn't published flood impacts for this gauge.</p>
+      )}
+    </section>
+
+    <aside class="side">
+      <section aria-labelledby="chart-h">
+        <h2 id="chart-h">Last 7 days{g.has_forecast ? ' and forecast' : ''}</h2>
+        <StageChart observations={observations} forecast={forecast} categories={cats} tz={tz} title={`${g.name} river level, last 7 days${g.has_forecast ? ' and NWS forecast' : ''}`} />
+        {fcIssued && <p class="small muted">Forecast issued {fmtTime(fcIssued, tz, true)} by NWS. Forecasts include expected rainfall and change as conditions develop.</p>}
+      </section>
+
+      {crests.length > 0 && (
+        <section aria-labelledby="crests-h">
+          <h2 id="crests-h">Highest crests on record</h2>
+          <table class="crests">
+            <thead><tr><th scope="col">Date</th><th scope="col">Crest</th><th scope="col">vs. now</th></tr></thead>
+            <tbody>
+              {crests.map((c) => (
+                <tr>
+                  <td>{fmtDate(c.occurred_at)}{c.preliminary ? ' (prelim.)' : ''}</td>
+                  <td>{ft(c.stage_ft)}</td>
+                  <td class="muted">{stage != null ? `+${(c.stage_ft - stage).toFixed(1)} ft` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {(upstream || downstream) && (
+        <section aria-labelledby="river-h">
+          <h2 id="river-h">Along the {river}</h2>
+          <ul class="neighbors">
+            {upstream && <li><span class="dir">Upstream</span><a href={`/gauge/${upstream.slug}/`}>{upstream.name}</a> <span class="muted small">{ft(upstream.stage_ft)}</span></li>}
+            {downstream && <li><span class="dir">Downstream</span><a href={`/gauge/${downstream.slug}/`}>{downstream.name}</a> <span class="muted small">{ft(downstream.stage_ft)}</span></li>}
+          </ul>
+        </section>
+      )}
+
+      <section aria-labelledby="src-h">
+        <h2 id="src-h">Sources</h2>
+        <ul class="sources small">
+          {nwsUrl && <li><a href={nwsUrl}>NWS gauge page ({g.lid})</a>: official forecast and flood categories</li>}
+          {usgsUrl && <li><a href={usgsUrl}>USGS site {g.usgs_id}</a>: real-time readings (provisional)</li>}
+          <li><a href="https://www.weather.gov/">weather.gov</a>: warnings and watches</li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+</Base>
+
+<style>
+  .hero { padding-block: clamp(1.5rem, 5vw, 3rem) 1.5rem; }
+  .eyebrow { font: 700 0.8rem/1.3 var(--body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  h1 {
+    font: 800 clamp(2.4rem, 7vw, 4.5rem)/0.95 var(--display);
+    text-transform: uppercase;
+    letter-spacing: 0.005em;
+    margin: 0.35rem 0 0.9rem;
+    max-width: 20ch;
+  }
+  .answer {
+    font-size: clamp(1.2rem, 2.6vw, 1.6rem);
+    line-height: 1.35;
+    font-weight: 600;
+    max-width: 46ch;
+    text-wrap: pretty;
+  }
+  .status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-top: 0.9rem; }
+  .when { color: var(--muted); font-size: 0.9rem; }
+  .when.stale { color: #9a3412; font-weight: 600; }
+  .pill {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font: 700 0.8rem/1.4 var(--body);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #fff;
+    background: var(--ink);
+  }
+  .pill--sm { font-size: 0.7rem; margin-left: 0.4rem; vertical-align: middle; }
+  .pill--normal { background: #0b7a3b; }
+  .pill--action { background: var(--cat-action); color: var(--ink); box-shadow: inset 0 0 0 1px #c9b800; }
+  .pill--minor { background: var(--cat-minor); color: var(--ink); }
+  .pill--moderate { background: var(--cat-moderate); }
+  .pill--major { background: var(--cat-major); }
+  .pill--no_data { background: var(--cat-no_data); }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 1px;
+    margin: 1.5rem 0 0;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .facts div { background: var(--card); padding: 0.75rem 1rem; }
+  .facts dt { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+  .facts dd { margin: 0.2rem 0 0; font-weight: 600; font-size: 1.05rem; }
+
+  .alerts { display: grid; gap: 0.75rem; margin-bottom: 2.5rem; }
+  .alert-note { padding: 0.75rem 1rem; border-left: 4px solid var(--rule); background: var(--card); border-radius: 0 6px 6px 0; }
+  .alert { background: var(--card); border: 2px solid var(--cat-moderate); border-radius: 6px; padding: 1rem; display: grid; gap: 0.35rem; }
+  .alert-event { font: 800 1.3rem/1 var(--display); text-transform: uppercase; color: #b00000; }
+  .alert-headline { font-weight: 600; }
+  .alert pre { white-space: pre-wrap; font: inherit; font-size: 0.9rem; margin: 0.5rem 0 0; }
+  .alert summary { cursor: pointer; font-size: 0.9rem; color: var(--water-deep); }
+
+  .layout { display: grid; gap: 2.5rem; }
+  .layout h2 { margin-bottom: 0.6rem; }
+  .lede { max-width: 55ch; margin-bottom: 1rem; font-size: 0.95rem; }
+  .side { display: grid; gap: 2.25rem; align-content: start; }
+  .side .small { margin-top: 0.5rem; }
+
+  .crests { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font-size: 0.95rem; }
+  .crests th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--rule); }
+  .crests td { padding: 0.55rem 0.9rem; border-top: 1px solid #e6ecef; }
+  .crests tbody tr:first-child td { font-weight: 700; }
+
+  .neighbors, .sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+  .dir { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  @media (min-width: 64rem) {
+    .layout { grid-template-columns: minmax(0, 1fr) 27rem; align-items: start; }
+  }
+</style>

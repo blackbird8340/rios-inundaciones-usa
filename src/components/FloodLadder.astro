@@ -1,0 +1,209 @@
+---
+// La "escala": impactos, umbrales de categoría y cresta récord ordenados por altura,
+// con el nivel actual como línea de agua. Lo que queda debajo del agua ya está pasando.
+// Los niveles muy por encima del río quedan plegados para no enterrar la línea de agua en móvil.
+import { statusFor, type Categories } from '../lib/flood.ts';
+
+interface Props {
+  categories: Categories;
+  impacts: { stage_ft: number; statement: string }[];
+  stage: number | null;
+  trend: string | null;
+  forecastCrest: number | null;
+  record: { stage_ft: number; occurred_at: Date } | null;
+}
+const { categories, impacts, stage, trend, forecastCrest, record } = Astro.props;
+
+type Rung = { stage: number; kind: 'impact' | 'threshold' | 'record'; tag?: string; text: string };
+const rungs: Rung[] = impacts.map((i) => ({ stage: i.stage_ft, kind: 'impact', text: i.statement }));
+
+const thresholds: [keyof Categories, string, string][] = [
+  ['major_ft', 'Major flood stage', 'Extensive flooding of structures and roads; significant evacuations possible.'],
+  ['moderate_ft', 'Moderate flood stage', 'Some structures and roads near the river flood; some evacuations possible.'],
+  ['minor_ft', 'Flood stage (minor flooding)', 'Minimal or no property damage, but some public threat or inconvenience.'],
+  ['action_ft', 'Action stage', 'River is nearing flood stage. Officials begin preparing.'],
+];
+for (const [key, tag, text] of thresholds) {
+  const v = categories[key];
+  if (v != null) rungs.push({ stage: v, kind: 'threshold', tag, text });
+}
+if (record) {
+  const year = new Date(record.occurred_at).getUTCFullYear();
+  const same = rungs.find((r) => r.kind === 'impact' && r.stage === record.stage_ft);
+  if (same) same.tag = `Record crest · ${year}`;
+  else rungs.push({ stage: record.stage_ft, kind: 'record', tag: 'Record crest', text: `Highest level on record, ${year}.` });
+}
+// Mismo nivel: umbral primero, después récord, después impactos.
+const order = { threshold: 0, record: 1, impact: 2 };
+rungs.sort((a, b) => b.stage - a.stage || order[a.kind] - order[b.kind]);
+
+// Visible: hasta el segundo umbral por encima del nivel actual o de la cresta pronosticada.
+const reference = Math.max(stage ?? -Infinity, forecastCrest ?? -Infinity);
+const above = thresholds.map(([k]) => categories[k]).filter((v): v is number => v != null && v > reference).sort((a, b) => a - b);
+const cutoff = above.length ? above[Math.min(1, above.length - 1)] : Infinity;
+let hidden = rungs.filter((r) => r.stage > cutoff);
+if (hidden.length < 3) hidden = [];
+const visible = rungs.slice(hidden.length);
+
+const waterIndex = stage == null ? -1 : visible.findIndex((r) => r.stage <= stage);
+const colorFor = (s: number) => {
+  const st = statusFor(s, categories);
+  return st === 'normal' || st === 'no_data' ? 'transparent' : `var(--cat-${st})`;
+};
+const trendWord = trend === 'rising' || trend === 'falling' || trend === 'steady' ? trend : '';
+const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+const isUnder = (r: Rung) => stage != null && r.stage <= stage;
+---
+{rungs.length > 0 && (
+  <div class="ladder">
+    {hidden.length > 0 && (
+      <details class="more">
+        <summary>Show {hidden.length} higher levels, up to {fmt(hidden[0].stage)} ft</summary>
+        <ol aria-label="Higher flood levels">
+          {hidden.map((r) => (
+            <li class:list={['rung', `rung--${r.kind}`]} style={`--cat: ${colorFor(r.stage)}`}>
+              <span class="stage">{fmt(r.stage)}<small>ft</small></span>
+              <span class="body">{r.tag && <span class="tag">{r.tag}</span>}{r.text}</span>
+            </li>
+          ))}
+        </ol>
+      </details>
+    )}
+    <ol aria-label="Flood impacts by river level, highest first">
+      {visible.map((r, i) => (
+        <>
+          {i === waterIndex && stage != null && (
+            <li class="waterline">
+              <span class="stage">{fmt(stage)}<small>ft</small></span>
+              <span class="body"><strong>River is here now</strong>{trendWord && <> · {trendWord}</>}. Everything below this line is happening at the current level.</span>
+            </li>
+          )}
+          <li class:list={['rung', `rung--${r.kind}`, { under: isUnder(r) }]} style={`--cat: ${colorFor(r.stage)}`}>
+            <span class="stage">{fmt(r.stage)}<small>ft</small></span>
+            <span class="body">{r.tag && <span class="tag">{r.tag}</span>}{r.text}</span>
+          </li>
+        </>
+      ))}
+      {waterIndex === -1 && stage != null && (
+        <li class="waterline">
+          <span class="stage">{fmt(stage)}<small>ft</small></span>
+          <span class="body"><strong>River is here now</strong>{trendWord && <> · {trendWord}</>}, below every listed impact.</span>
+        </li>
+      )}
+    </ol>
+  </div>
+)}
+
+<style>
+  ol { list-style: none; margin: 0; padding: 0; }
+  .ladder {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  li {
+    display: grid;
+    grid-template-columns: 5.25rem 1fr;
+    position: relative;
+  }
+  .stage {
+    font: 800 1.6rem/1 var(--display);
+    padding: 0.85rem 0.75rem 0.85rem 0.9rem;
+    text-align: right;
+    /* la regla de un medidor de pared: marcas cada 0.5 rem */
+    background:
+      repeating-linear-gradient(to bottom, var(--rule) 0 1px, transparent 1px 0.5rem) right / 0.6rem 100% no-repeat;
+    padding-right: 1.1rem;
+  }
+  .stage small {
+    font: 600 0.7rem var(--body);
+    margin-left: 0.15rem;
+    color: var(--muted);
+  }
+  .body {
+    padding: 0.85rem 1rem 0.85rem 1.1rem;
+    border-left: 6px solid var(--cat, transparent);
+    border-top: 1px solid var(--rule);
+  }
+  .ladder > ol:first-child li:first-child .body { border-top: 0; }
+  .more summary {
+    cursor: pointer;
+    padding: 0.8rem 1rem 0.8rem 6.35rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--water-deep);
+    background: repeating-linear-gradient(to bottom, var(--rule) 0 1px, transparent 1px 0.5rem) 4.65rem 0 / 0.6rem 100% no-repeat;
+  }
+  .more[open] summary { border-bottom: 1px solid var(--rule); }
+  .more li:first-child .body { border-top: 0; }
+  .tag {
+    display: block;
+    font: 700 0.75rem/1.4 var(--body);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 0.15rem;
+  }
+  .rung--threshold .body, .rung--record .body { font-size: 0.9rem; color: var(--muted); }
+  .rung--threshold .tag, .rung--record .tag { color: var(--ink); }
+
+  /* Bajo el agua: tinte translúcido para que se sigan viendo la regla y la franja de categoría. */
+  .under { background: linear-gradient(to bottom, rgb(47 111 143 / 0.13), rgb(47 111 143 / 0.2)); }
+  .under .body { border-top-color: rgb(47 111 143 / 0.18); }
+  .under .stage small { color: var(--water-deep); }
+
+  .waterline {
+    color: #fff;
+    background:
+      /* reflejos suaves bajo la superficie */
+      radial-gradient(ellipse 5rem 0.35rem at 30% 0.7rem, rgb(255 255 255 / 0.16), transparent 70%),
+      radial-gradient(ellipse 7rem 0.4rem at 78% 1.4rem, rgb(255 255 255 / 0.1), transparent 70%),
+      linear-gradient(to bottom, #4a92b3 0%, #33799b 45%, #1f5673 100%);
+    text-shadow: 0 1px 1px rgb(16 36 58 / 0.35);
+  }
+  /* Dos capas de olas que derivan en sentidos opuestos */
+  .waterline::before,
+  .waterline::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    background-repeat: repeat-x;
+    z-index: 1;
+  }
+  .waterline::before {
+    top: -12px;
+    height: 13px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='13' viewBox='0 0 240 13'%3E%3Cpath d='M0 7Q60 0 120 7T240 7V13H0Z' fill='%2378b3cf' fill-opacity='.6'/%3E%3C/svg%3E");
+    background-size: 240px 13px;
+    animation: drift-back 11s linear infinite;
+  }
+  .waterline::after {
+    top: -9px;
+    height: 10px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='10' viewBox='0 0 160 10'%3E%3Cpath d='M0 5Q40 0 80 5T160 5V10H0Z' fill='%234a92b3'/%3E%3Cpath d='M0 5Q40 0 80 5T160 5' fill='none' stroke='%23ffffff' stroke-opacity='.55' stroke-width='1.2'/%3E%3C/svg%3E");
+    background-size: 160px 10px;
+    animation: drift-front 7s linear infinite;
+  }
+  @keyframes drift-front { to { background-position-x: 160px; } }
+  @keyframes drift-back { to { background-position-x: -240px; } }
+
+  /* La regla sigue visible debajo del agua */
+  .waterline .stage {
+    background: repeating-linear-gradient(to bottom, rgb(255 255 255 / 0.35) 0 1px, transparent 1px 0.5rem) right / 0.6rem 100% no-repeat;
+  }
+  .waterline .stage small { color: rgb(255 255 255 / 0.75); }
+  .waterline .body { border-left-color: rgb(255 255 255 / 0.1); border-top: 0; }
+  /* Si el río está debajo de todo, que se lea como un cuerpo de agua y no como una franja */
+  .waterline:last-child .body,
+  .waterline:last-child .stage { padding-bottom: 1.75rem; }
+
+  @media (max-width: 30rem) {
+    li { grid-template-columns: 4.25rem 1fr; }
+    .stage { font-size: 1.35rem; padding-left: 0.5rem; }
+    .body { padding-inline: 0.8rem; }
+    .more summary { padding-left: 5.1rem; background-position: 3.65rem 0; }
+  }
+</style>

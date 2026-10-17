@@ -1,0 +1,117 @@
+---
+// Gráfico SVG renderizado en el server (cero JS): observado 7 días + pronóstico NWS + líneas de categoría.
+import type { Categories } from '../lib/flood.ts';
+
+interface Props {
+  observations: { t: Date; v: number }[];
+  forecast: { t: Date; v: number }[];
+  categories: Categories;
+  tz: string;
+  title: string;
+}
+const { observations, forecast, categories, tz, title } = Astro.props;
+
+const W = 480, H = 280;
+const M = { top: 14, right: 86, bottom: 28, left: 36 };
+const iw = W - M.left - M.right, ih = H - M.top - M.bottom;
+
+const all = [...observations, ...forecast];
+const hasData = all.length > 1;
+
+const values = all.map((p) => p.v);
+const cats = [
+  { key: 'action_ft', label: 'Action', color: 'var(--cat-action)', stroke: '#c9b800' },
+  { key: 'minor_ft', label: 'Flood', color: 'var(--cat-minor)', stroke: 'var(--cat-minor)' },
+  { key: 'moderate_ft', label: 'Moderate', color: 'var(--cat-moderate)', stroke: 'var(--cat-moderate)' },
+  { key: 'major_ft', label: 'Major', color: 'var(--cat-major)', stroke: 'var(--cat-major)' },
+] as const;
+// Siempre mostramos hasta flood stage para dar contexto; las categorías más altas solo si el río se acerca.
+const dataMax = Math.max(...values);
+const ceiling = Math.max(dataMax, categories.action_ft ?? -Infinity, categories.minor_ft ?? -Infinity);
+const visibleCats = cats.filter((c) => {
+  const v = categories[c.key];
+  return v != null && (c.key === 'action_ft' || c.key === 'minor_ft' || v <= dataMax + 2);
+});
+let yMin = Math.min(...values), yMax = Math.max(ceiling, ...visibleCats.map((c) => categories[c.key]!));
+const pad = Math.max((yMax - yMin) * 0.08, 0.5);
+yMin = Math.floor(yMin - pad);
+yMax = Math.ceil(yMax + pad);
+
+const t0 = hasData ? Math.min(...all.map((p) => p.t.getTime())) : 0;
+const t1 = hasData ? Math.max(...all.map((p) => p.t.getTime())) : 1;
+const x = (t: number) => M.left + ((t - t0) / (t1 - t0 || 1)) * iw;
+const y = (v: number) => M.top + (1 - (v - yMin) / (yMax - yMin || 1)) * ih;
+const path = (pts: { t: Date; v: number }[]) =>
+  pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t.getTime()).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+
+// Pronóstico arranca desde el último observado para que la línea sea continua.
+const lastObs = observations.at(-1);
+const fcPts = forecast.filter((p) => !lastObs || p.t > lastObs.t);
+const fcPath = fcPts.length ? path(lastObs ? [lastObs, ...fcPts] : fcPts) : '';
+
+// Medianoche local del medidor para las marcas de días.
+const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hourCycle: 'h23' });
+const dayFmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', day: 'numeric' });
+const dayTicks: number[] = [];
+for (let t = Math.ceil(t0 / 3600_000) * 3600_000; t <= t1; t += 3600_000) {
+  if (hourFmt.format(t) === '0') dayTicks.push(t);
+}
+const yStep = (yMax - yMin) > 20 ? 5 : (yMax - yMin) > 8 ? 2 : 1;
+const yTicks: number[] = [];
+for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) yTicks.push(v);
+const now = Date.now();
+---
+{hasData ? (
+  <figure class="chart">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby="chart-title">
+      <title id="chart-title">{title}</title>
+      {yTicks.map((v) => (
+        <g>
+          <line x1={M.left} x2={M.left + iw} y1={y(v)} y2={y(v)} class="grid" />
+          <text x={M.left - 8} y={y(v) + 4} class="axis" text-anchor="end">{v}</text>
+        </g>
+      ))}
+      {dayTicks.map((t) => (
+        <g>
+          <line x1={x(t)} x2={x(t)} y1={M.top} y2={M.top + ih} class="grid" />
+          <text x={x(t) + 4} y={H - 10} class="axis">{dayFmt.format(t)}</text>
+        </g>
+      ))}
+      {visibleCats.map((c) => (
+        <g>
+          <line x1={M.left} x2={M.left + iw} y1={y(categories[c.key]!)} y2={y(categories[c.key]!)} stroke={c.stroke} stroke-width="2" />
+          <rect x={M.left + iw + 6} y={y(categories[c.key]!) - 9} width="10" height="10" fill={c.color} />
+          <text x={M.left + iw + 20} y={y(categories[c.key]!) + 1} class="cat">{c.label} {categories[c.key]}</text>
+        </g>
+      ))}
+      {now > t0 && now < t1 && (
+        <g>
+          <line x1={x(now)} x2={x(now)} y1={M.top} y2={M.top + ih} class="now" />
+          <text x={x(now) + 4} y={M.top + 10} class="axis">now</text>
+        </g>
+      )}
+      {observations.length > 1 && <path d={path(observations)} class="obs" />}
+      {fcPath && <path d={fcPath} class="fc" />}
+    </svg>
+    <figcaption class="legend small">
+      <span><i class="key key-obs"></i>Observed (ft)</span>
+      {fcPath && <span><i class="key key-fc"></i>NWS forecast</span>}
+    </figcaption>
+  </figure>
+) : (
+  <p class="muted">Not enough recent readings to draw a chart.</p>
+)}
+
+<style>
+  .chart { margin: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 0.75rem 0.5rem 0.5rem; }
+  svg { width: 100%; height: auto; display: block; }
+  .grid { stroke: #e3e9ec; stroke-width: 1; }
+  .axis { font: 500 11px var(--body); fill: var(--muted); }
+  .cat { font: 600 11px var(--body); fill: var(--ink); dominant-baseline: middle; }
+  .now { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 3; }
+  .obs { fill: none; stroke: var(--water-deep); stroke-width: 2.5; stroke-linejoin: round; }
+  .fc { fill: none; stroke: var(--water); stroke-width: 2.5; stroke-dasharray: 6 5; }
+  .legend { display: flex; gap: 1.25rem; padding: 0.25rem 0.75rem; color: var(--muted); }
+  .key { display: inline-block; width: 1.5rem; height: 0; border-top: 3px solid var(--water-deep); vertical-align: middle; margin-right: 0.4rem; }
+  .key-fc { border-top: 3px dashed var(--water); }
+</style>
