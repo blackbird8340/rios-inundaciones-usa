@@ -1,6 +1,6 @@
 // Cada 15 min: alertas de crecida activas de api.weather.gov por estado.
 // Uso: npm run ingest:alerts
-import { db } from '../../src/lib/db.ts';
+import { db, withDeadlockRetry } from '../../src/lib/db.ts';
 import { fetchJson } from '../../src/lib/http.ts';
 import { NWS_API_BASE } from '../../src/lib/config.ts';
 import { runJob, selectedStates } from '../lib/run.ts';
@@ -36,16 +36,16 @@ runJob('alerts', async () => {
       if (!FLOOD_EVENT.test(a.event)) continue;
       seen.add(a.id);
       const d = (s: string | null) => (s ? new Date(s) : null);
-      await db().execute(
+      await withDeadlockRetry(() => db().execute(
         `INSERT INTO alerts (id, event, severity, headline, description, instruction, area_desc, sender_name, sent_at, onset_at, expires_at, ends_at, fetched_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE headline = VALUES(headline), description = VALUES(description), instruction = VALUES(instruction),
            expires_at = VALUES(expires_at), ends_at = VALUES(ends_at), fetched_at = VALUES(fetched_at)`,
         [a.id, a.event, a.severity, a.headline, a.description, a.instruction, a.areaDesc, a.senderName, d(a.sent), d(a.onset), d(a.expires), d(a.ends), now],
-      );
+      ));
       // SAME = "0" + FIPS de estado (2) + condado (3)
       const fips = (a.geocode?.SAME ?? []).map((s) => s.slice(-5));
-      if (fips.length) await db().query('INSERT IGNORE INTO alert_counties (alert_id, county_fips) VALUES ?', [fips.map((f) => [a.id, f])]);
+      if (fips.length) await withDeadlockRetry(() => db().query('INSERT IGNORE INTO alert_counties (alert_id, county_fips) VALUES ?', [fips.map((f) => [a.id, f])]));
     }
   }
 
@@ -53,7 +53,7 @@ runJob('alerts', async () => {
   if (allOk) {
     const [old] = await db().query<any[]>('SELECT id FROM alerts');
     const gone = old.map((r) => r.id).filter((id) => !seen.has(id));
-    if (gone.length) await db().query('DELETE FROM alerts WHERE id IN (?)', [gone]);
+    if (gone.length) await withDeadlockRetry(() => db().query('DELETE FROM alerts WHERE id IN (?)', [gone]));
   } else {
     throw new Error('some states failed; kept previous alerts');
   }
