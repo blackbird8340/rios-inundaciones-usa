@@ -22,7 +22,6 @@ const status = (g.stage_ft != null ? g.status : 'no_data') as FloodStatus;
 const minutesOld = observedAt ? (Date.now() - observedAt.getTime()) / 60_000 : Infinity;
 const stale = minutesOld > STALE_AFTER_MIN;
 const record = crests[0] ?? null;
-const placeLabel = `${g.place_name ?? g.name}, ${g.state_code}`;
 const river = g.river_name ?? g.name;
 
 // Respuesta directa en una línea: dónde está el río respecto de la próxima categoría.
