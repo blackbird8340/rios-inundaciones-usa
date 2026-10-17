@@ -13,7 +13,7 @@ const { gauge: g, impacts, crests, observations, forecast, alerts, alertsChecked
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 
-const tz = ianaZone(g.time_zone);
+const tz = ianaZone(g.time_zone, g.state_code);
 const cats = { action_ft: g.action_ft, minor_ft: g.minor_ft, moderate_ft: g.moderate_ft, major_ft: g.major_ft };
 // gauges.stage_ft queda en null si el último dato tiene más de un día; ahí mostramos el último que haya.
 const stage: number | null = g.stage_ft ?? lastObservation?.stage_ft ?? null;

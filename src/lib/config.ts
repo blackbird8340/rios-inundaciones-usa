@@ -1,7 +1,8 @@
 // Estados del MVP. Para escalar, agregar entradas acá (bbox en EPSG:4326).
+// timeZone: zona IANA de respaldo cuando NWPS manda una zona inválida para un medidor.
 export const STATES = [
-  { code: 'PA', name: 'Pennsylvania', slug: 'pennsylvania', fips: '42', bbox: [-80.52, 39.72, -74.69, 42.27] },
-  { code: 'NC', name: 'North Carolina', slug: 'north-carolina', fips: '37', bbox: [-84.33, 33.84, -75.46, 36.59] },
+  { code: 'PA', name: 'Pennsylvania', slug: 'pennsylvania', fips: '42', bbox: [-80.52, 39.72, -74.69, 42.27], timeZone: 'America/New_York' },
+  { code: 'NC', name: 'North Carolina', slug: 'north-carolina', fips: '37', bbox: [-84.33, 33.84, -75.46, 36.59], timeZone: 'America/New_York' },
 ] as const;
 
 export type StateConfig = (typeof STATES)[number];
