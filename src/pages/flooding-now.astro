@@ -1,0 +1,52 @@
+---
+import Base from '../layouts/Base.astro';
+import GaugeCards from '../components/GaugeCards.astro';
+import { getFloodingNow, listActiveAlerts } from '../lib/queries.ts';
+import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
+import { fmtTime, ft, ianaZone } from '../lib/format.ts';
+const [{ now, forecast }, alerts] = await Promise.all([getFloodingNow(), listActiveAlerts()]);
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const warnings = alerts.filter((a) => /flood warning/i.test(a.event));
+const rank: Record<string, number> = { major: 3, moderate: 2, minor: 1 };
+now.sort((a, b) => rank[b.status] - rank[a.status]);
+const updated = new Date();
+const lede = now.length || forecast.length || warnings.length
+  ? `${now.length} river gauge${now.length === 1 ? ' is' : 's are'} above flood stage, ${forecast.length} more ${forecast.length === 1 ? 'is' : 'are'} forecast to flood, and ${warnings.length} NWS flood warning${warnings.length === 1 ? ' is' : 's are'} active.`
+  : 'No river gauge we track is above flood stage right now, none is forecast to flood, and there are no NWS flood warnings.';
+const jsonLd = [{ '@context': 'https://schema.org', '@type': 'Dataset', name: 'Rivers flooding now', description: lede, isAccessibleForFree: true, dateModified: updated.toISOString(),
+  creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey' }, { '@type': 'Organization', name: 'NOAA National Weather Service' }] }];
+---
+<Base title="Flooding Now: Rivers Above Flood Stage Today (PA & NC)" description={lede} canonicalPath="/flooding-now/" jsonLd={jsonLd}>
+  <ol class="crumbs" slot="crumbs"><li><a href="/flooding-now/">Flooding now</a></li></ol>
+  <h1 class="h">Flooding now</h1>
+  <p class="lede">{lede} <span class="muted">Updated automatically every 30 minutes from USGS and NWS data.</span></p>
+
+  <section class="b"><h2>Above flood stage now</h2>
+    {now.length ? <GaugeCards gauges={now} /> : <p class="calm">None right now.</p>}
+  </section>
+
+  <section class="b"><h2>Forecast to flood</h2>
+    {forecast.length ? (
+      <ul class="fc">{forecast.map((f) => (
+        <li><a href={`/gauge/${f.slug}/`}>{f.name}, {f.state_code}</a>
+          <span>now {ft(f.stage_ft)} → crest {ft(f.forecast_crest_ft)} {fmtTime(f.forecast_crest_at, ianaZone(f.time_zone, f.state_code), true)}</span>
+          <span class="pill" style={`background:var(--cat-${f.forecast_status})`}>{STATUS_META[f.forecast_status as FloodStatus].label}</span></li>
+      ))}</ul>
+    ) : <p class="calm">No NWS river forecast reaches flood stage right now.</p>}
+  </section>
+
+  <section class="b"><h2>NWS flood warnings</h2>
+    {warnings.length ? <ul class="fc">{warnings.map((a) => <li><a href="/alerts/">{a.event}</a><span>{a.area_desc}</span></li>)}</ul> : <p class="calm">No active flood warnings. <a href="/alerts/">See watches and advisories</a>.</p>}
+  </section>
+  <p class="small muted">Turn around, don't drown: just 6 inches of moving water can knock you down and 12 inches can carry away a car (NWS). Call 911 if you are in danger.</p>
+</Base>
+<style>
+  .h { font: 800 clamp(2.2rem, 7vw, 3.6rem)/0.95 var(--display); text-transform: uppercase; margin-top: 1.5rem; }
+  .lede { margin: 0.7rem 0 1rem; max-width: 46rem; font-size: 1.1rem; }
+  .b { margin-top: 2rem; } .b h2 { margin-bottom: 0.7rem; }
+  .calm { padding: 0.9rem 1.1rem; background: var(--card); border-left: 6px solid var(--cat-normal); border-radius: 6px; }
+  .fc { list-style: none; padding: 0; display: grid; gap: 0.4rem; }
+  .fc li { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; align-items: center; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 0.6rem 0.9rem; }
+  .fc a { font-weight: 700; }
+  .pill { font: 700 0.7rem/1 var(--body); text-transform: uppercase; padding: 0.3rem 0.5rem; border-radius: 99px; }
+</style>
