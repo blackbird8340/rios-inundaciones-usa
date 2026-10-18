@@ -4,6 +4,7 @@ import '@fontsource/big-shoulders-display/latin-700';
 import '@fontsource/big-shoulders-display/latin-800';
 import '../styles/global.css';
 import Logo from '../components/Logo.astro';
+import { floodSummary } from '../lib/queries.ts';
 
 interface Props {
   title: string;
@@ -15,6 +16,8 @@ interface Props {
 }
 const { title, description, canonicalPath, jsonLd = [], noindex = false, ogImage } = Astro.props;
 const siteName = process.env.SITE_NAME || 'Current Floods';
+const fs = await floodSummary();
+const banner = fs.flooding + fs.forecast + fs.warnings > 0 && canonicalPath !== '/flooding-now/';
 const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
 ---
 <!doctype html>
@@ -46,6 +49,13 @@ const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 
       <a class="brand" href="/" aria-label={`${siteName} home`}><Logo name={siteName} /></a>
       <slot name="crumbs" />
     </header>
+    {banner && (
+      <a class="flood-banner" href="/flooding-now/">
+        <strong>Flooding now:</strong>
+        {[fs.flooding && `${fs.flooding} river gauge${fs.flooding === 1 ? '' : 's'} above flood stage`, fs.forecast && `${fs.forecast} forecast to flood`, fs.warnings && `${fs.warnings} NWS flood warning${fs.warnings === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+        <span aria-hidden="true">→</span>
+      </a>
+    )}
     <main id="main">
       <slot />
     </main>
@@ -56,10 +66,14 @@ const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 
         Warnings: <a href="https://www.weather.gov/">weather.gov</a>.
       </p>
       <nav class="foot-nav" aria-label="Site">
-        <a href="/">Home</a><a href="/pennsylvania/">Pennsylvania</a><a href="/north-carolina/">North Carolina</a><a href="/alerts/">Flood alerts</a><a href="/rising/">Rising fastest</a><a href="/webcams/">River cameras</a>
+        <a href="/">Home</a><a href="/pennsylvania/">Pennsylvania</a><a href="/north-carolina/">North Carolina</a><a href="/flooding-now/">Flooding now</a><a href="/alerts/">Flood alerts</a><a href="/rising/">Rising fastest</a><a href="/webcams/">River cameras</a>
         <a href="/about/">About</a><a href="/methodology/">Methodology</a><a href="/sources/">Sources</a>
       </nav>
       <p>Data: USGS, NOAA/NWS. Real-time USGS data is provisional and subject to revision. {siteName} is not affiliated with USGS or NOAA.</p>
     </footer>
   </body>
 </html>
+<style is:global>
+  .flood-banner { display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; align-items: center; justify-content: center; padding: 0.6rem 1rem; background: #b00000; color: #fff; text-decoration: none; font-size: 0.95rem; text-align: center; }
+  .flood-banner:hover { background: #8f0000; }
+</style>

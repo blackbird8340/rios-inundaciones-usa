@@ -234,3 +234,35 @@ export async function listActiveAlerts(withShapes = false) {
     counties: (links as any[]).filter((l) => l.alert_id === a.id).map((l) => ({ name: `${l.county_name} County, ${l.state_code}`, href: `/${l.state_slug}/${countySlug(l.county_name)}/` })),
   }));
 }
+
+// Resumen "crecida en curso" para el banner de todas las páginas (caché en memoria 2 min por instancia).
+let floodCache: { at: number; v: { flooding: number; forecast: number; warnings: number } } | null = null;
+export async function floodSummary() {
+  if (floodCache && Date.now() - floodCache.at < 120_000) return floodCache.v;
+  try {
+    const [[r]] = await db().execute<any[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM gauges WHERE stage_ft IS NOT NULL AND gauge_type <> 'reservoir' AND status IN ('minor','moderate','major')) flooding,
+         (SELECT COUNT(*) FROM gauges WHERE forecast_status IN ('minor','moderate','major') AND (stage_ft IS NULL OR status NOT IN ('minor','moderate','major'))
+            AND forecast_crest_at > NOW()) forecast,
+         (SELECT COUNT(*) FROM alerts WHERE event LIKE '%Flood Warning%' AND (expires_at IS NULL OR expires_at > NOW())) warnings`,
+    );
+    const v = { flooding: Number(r.flooding), forecast: Number(r.forecast), warnings: Number(r.warnings) };
+    floodCache = { at: Date.now(), v };
+    return v;
+  } catch {
+    return { flooding: 0, forecast: 0, warnings: 0 };
+  }
+}
+
+export async function getFloodingNow() {
+  const [now, [fc]] = await Promise.all([
+    listHomeGauges("g.stage_ft IS NOT NULL AND g.gauge_type <> 'reservoir' AND g.status IN ('minor','moderate','major')"),
+    db().execute<any[]>(
+      `SELECT g.slug, g.name, g.state_code, g.stage_ft, g.forecast_crest_ft, g.forecast_crest_at, g.forecast_status, g.minor_ft, g.time_zone
+       FROM gauges g WHERE g.forecast_status IN ('minor','moderate','major') AND g.forecast_crest_at > NOW()
+         AND (g.stage_ft IS NULL OR g.status NOT IN ('minor','moderate','major')) ORDER BY g.forecast_crest_at`,
+    ),
+  ]);
+  return { now, forecast: (fc as any[]).map((r) => ({ ...r, name: cleanName(r.name), forecast_crest_ft: Number(r.forecast_crest_ft) })) };
+}
