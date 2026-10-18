@@ -365,15 +365,14 @@ const jsonLd = [
         };
         requestAnimationFrame(pulse);
       }
-      // Alertas NWS activas de crecida con polígono (las que solo tienen zonas no se dibujan).
-      fetch('https://api.weather.gov/alerts/active?area=PA,NC', { headers: { Accept: 'application/geo+json' } })
+      // Alertas NWS de crecida activas: polígono propio o unión de zonas (lo arma la ingesta, ver /alerts.geojson).
+      fetch('/alerts.geojson')
         .then((r) => r.json())
         .then((fc) => {
-          const feats = (fc.features ?? []).filter((f: any) => f.geometry && /flood/i.test(f.properties?.event ?? ''))
-            .map((f: any) => ({ type: 'Feature', geometry: f.geometry, properties: { event: f.properties.event, headline: f.properties.headline ?? '' } }));
+          const feats = fc.features ?? [];
           (map.getSource('alerts') as any).setData({ type: 'FeatureCollection', features: feats });
           const note = document.getElementById('alerts-note');
-          if (note) note.textContent = feats.length ? `${feats.length} active NWS flood alert area${feats.length === 1 ? '' : 's'} drawn.` : 'No NWS flood alert polygons active right now.';
+          if (note) note.innerHTML = feats.length ? `${feats.length} active NWS flood alert${feats.length === 1 ? '' : 's'} drawn. <a href="/alerts/">See all alerts</a>` : 'No active NWS flood alerts right now.';
         })
         .catch(() => { const note = document.getElementById('alerts-note'); if (note) note.textContent = 'Could not load NWS alerts.'; });
     });
@@ -389,7 +388,7 @@ const jsonLd = [
     map.on('click', 'alerts-fill', (e: any) => {
       if (map.queryRenderedFeatures(e.point, { layers: ['dots', 'clusters'] }).length) return;
       const p = e.features[0].properties;
-      new maplibregl.Popup({ className: 'gpop', maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(`<strong class="gpop-name">${esc(p.event)}</strong><span>${esc(p.headline)}</span><a class="gpop-link" href="https://www.weather.gov/" target="_blank" rel="noopener">Official details at weather.gov →</a>`).addTo(map);
+      new maplibregl.Popup({ className: 'gpop', maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(`<strong class="gpop-name">${esc(p.event)}</strong><span>${esc(p.headline)}</span><a class="gpop-link" href="/alerts/">Alert details →</a>`).addTo(map);
     });
     map.on('click', 'dots', (e: any) => {
       const f = e.features![0];

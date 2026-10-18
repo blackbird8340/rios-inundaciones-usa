@@ -159,3 +159,17 @@ CREATE TABLE IF NOT EXISTS flow_normals_sites (
   fetched_at DATETIME NOT NULL,
   ok BOOLEAN NOT NULL
 );
+
+-- Forma de cada alerta: su polígono, o la unión de sus zonas NWS (las alertas por zona no traen polígono).
+CREATE TABLE IF NOT EXISTS alert_shapes (
+  alert_id VARCHAR(255) PRIMARY KEY,
+  geojson MEDIUMTEXT NOT NULL,
+  FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE
+);
+
+-- Caché de geometrías de zonas NWS (cambian muy poco).
+CREATE TABLE IF NOT EXISTS nws_zones (
+  zone_url VARCHAR(160) PRIMARY KEY,
+  geojson MEDIUMTEXT NULL,
+  fetched_at DATETIME NOT NULL
+);
