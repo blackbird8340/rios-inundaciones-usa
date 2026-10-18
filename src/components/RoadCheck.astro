@@ -1,0 +1,30 @@
+---
+import { ROAD_LINKS, roadsFromImpacts } from '../lib/roads.ts';
+import { ft } from '../lib/format.ts';
+interface Props { impacts: { stage_ft: number; statement: string }[]; stage: number | null; state: string; place: string }
+const { impacts, stage, state, place } = Astro.props;
+const roads = roadsFromImpacts(impacts).slice(0, 12);
+const link = ROAD_LINKS[state];
+---
+{roads.length > 0 && (
+  <section class="roads" aria-labelledby="roads-h">
+    <h2 id="roads-h">Is my road flooded?</h2>
+    <p class="small muted">Roads the National Weather Service names in its flood impacts for this gauge, and the river level at which water reaches them.</p>
+    <ul>
+      {roads.map((r) => {
+        const wet = stage != null && stage >= r.stage_ft;
+        return <li class:list={{ wet }}><span class="r">{r.road}</span><span class="small">{wet ? 'Likely flooded at the current level' : `Floods at about ${ft(r.stage_ft)}${stage != null ? ` (${(r.stage_ft - stage).toFixed(1)} ft above now)` : ''}`}</span></li>;
+      })}
+    </ul>
+    <p class="small">This is an estimate from the river level near {place}, not a road report. {link ? <>Check official closures on <a href={link.url} rel="noopener">{link.name}</a>.</> : 'Check your state DOT for official closures.'} Never drive through flooded roads.</p>
+  </section>
+)}
+<style>
+  .roads { margin-top: 2rem; }
+  .roads h2 { margin-bottom: 0.3rem; }
+  .roads ul { list-style: none; padding: 0; margin: 0.7rem 0; background: var(--card); border: 1px solid var(--rule); border-radius: 8px; }
+  .roads li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.2rem 1rem; padding: 0.55rem 0.9rem; border-top: 1px solid var(--rule); }
+  .roads li:first-child { border-top: 0; }
+  .roads .r { font-weight: 700; }
+  .roads li.wet { background: #fff1f1; } .roads li.wet .small { color: #b00000; font-weight: 600; }
+</style>

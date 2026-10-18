@@ -7,6 +7,7 @@ import Webcam from '../../components/Webcam.astro';
 import FlowVsNormal from '../../components/FlowVsNormal.astro';
 import EmbedCode from '../../components/EmbedCode.astro';
 import RainOutlook from '../../components/RainOutlook.astro';
+import RoadCheck from '../../components/RoadCheck.astro';
 import { forecastSentence } from '../../lib/insights.ts';
 import { countySlug, getGaugePage, gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
@@ -175,6 +176,7 @@ const jsonLd = [
       ) : (
         <p class="muted">The National Weather Service hasn't published flood impacts for this gauge.</p>
       )}
+      <RoadCheck impacts={impacts} stage={stage} state={g.state_code} place={g.place_name ?? g.name} />
     </section>
 
     <aside class="side">
