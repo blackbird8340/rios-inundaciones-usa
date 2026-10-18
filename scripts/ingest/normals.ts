@@ -12,9 +12,11 @@ const KEYS = ['5', '10', '25', '50', '75', '90', '95'];
 runJob('normals', async () => {
   const limit = Math.max(1, Number(arg('limit') ?? 150));
   const [sites] = await db().query<any[]>(
-    `SELECT g.usgs_id, MIN(s.fetched_at) last_at FROM gauges g LEFT JOIN flow_normals_sites s ON s.usgs_id = g.usgs_id
-     WHERE g.usgs_id IS NOT NULL AND (s.usgs_id IS NULL OR s.fetched_at < NOW() - INTERVAL 60 DAY)
-     GROUP BY g.usgs_id ORDER BY last_at IS NOT NULL, last_at LIMIT ${limit}`,
+    `SELECT t.usgs_id FROM (
+       SELECT g.usgs_id, MIN(s.fetched_at) last_at FROM gauges g LEFT JOIN flow_normals_sites s ON s.usgs_id = g.usgs_id
+       WHERE g.usgs_id IS NOT NULL AND (s.usgs_id IS NULL OR s.fetched_at < NOW() - INTERVAL 60 DAY)
+       GROUP BY g.usgs_id
+     ) t ORDER BY t.last_at IS NULL DESC, t.last_at LIMIT ${limit}`,
   );
   let withData = 0;
   const errors = await pool(sites.map((s) => s.usgs_id as string), 3, async (id) => {
