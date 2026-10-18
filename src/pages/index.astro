@@ -131,11 +131,11 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
 
   <section class="block" aria-labelledby="map-h">
     <h2 id="map-h">Map of gauges</h2>
-    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category. Tap one to open it.</p>
+    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category. Flooding gauges pulse. Tap a dot for details.</p>
     <div id="map" class="map" role="region" aria-label="Map of river gauges"><p class="map-loading">Loading map…</p></div>
     <ul class="legend">
       {(['normal', 'action', 'minor', 'moderate', 'major', 'no_data'] as FloodStatus[]).map((s) => (
-        <li><span class="dot" style={`background: var(--cat-${s})`}></span>{STATUS_META[s].label}</li>
+        <li><span class:list={['dot', { pulse: ['minor', 'moderate', 'major'].includes(s) }]} style={`background: var(--cat-${s}); --g: var(--cat-${s})`}></span>{STATUS_META[s].label}</li>
       ))}
     </ul>
   </section>
@@ -240,27 +240,73 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
     }, () => render([], 'Location not available. Search by town or river instead.'), { timeout: 10000 });
   });
 
-  // Mapa: se carga recién cuando se acerca a la pantalla.
+  // Mapa: MapLibre + OpenFreeMap (Positron). Se carga recién cuando se acerca a la pantalla.
   const mapEl = document.getElementById('map')!;
   new IntersectionObserver(async (entries, obs) => {
     if (!entries.some((e) => e.isIntersecting)) return;
     obs.disconnect();
-    const [{ default: L }, rows] = await Promise.all([import('leaflet'), load(), import('leaflet/dist/leaflet.css')]);
+    const lib = '/vendor/maplibre/maplibre-gl.mjs';
+    const [maplibregl, rows] = (await Promise.all([import(/* @vite-ignore */ new URL(lib, location.href).href), load(), import('maplibre-gl/dist/maplibre-gl.css')])) as [typeof import('maplibre-gl'), Row[], unknown];
     mapEl.innerHTML = '';
-    const map = L.map(mapEl, { scrollWheelZoom: false });
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
     const order: Record<string, number> = { no_data: 0, normal: 1, action: 2, minor: 3, moderate: 4, major: 5 };
-    const pts = [...rows].sort((a, b) => order[a[8]] - order[b[8]]).map((r) => {
-      const hot = order[r[8]] >= 2;
-      L.circleMarker([r[6], r[7]], { radius: hot ? 7 : 4, color: hot ? '#10243a' : '#fff', weight: 1, fillColor: COLORS[r[8]], fillOpacity: 0.9 })
-        .bindPopup(`<a href="/gauge/${r[0]}/"><strong>${esc(r[1])}</strong></a><br>${LABELS[r[8]]} · ${fmt(r[9])}`)
-        .addTo(map);
-      return [r[6], r[7]] as [number, number];
+    const data = {
+      type: 'FeatureCollection' as const,
+      features: rows.map((r) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [r[7], r[6]] },
+        properties: { slug: r[0], name: r[1], status: r[8], stage: r[9], rank: order[r[8]] },
+      })),
+    };
+    const lons = rows.map((r) => r[7]), lats = rows.map((r) => r[6]);
+    const map = new maplibregl.Map({
+      container: mapEl,
+      style: 'https://tiles.openfreemap.org/styles/positron',
+      bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      fitBoundsOptions: { padding: 24 },
+      cooperativeGestures: true,
+      attributionControl: { compact: true },
     });
-    map.fitBounds(L.latLngBounds(pts), { padding: [12, 12] });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const color: any = ['match', ['get', 'status'], ...Object.entries(COLORS).flat(), '#9e9e9e'];
+    (mapEl as any).__map = map;
+    map.on('load', () => {
+      map.addSource('gauges', { type: 'geojson', data });
+      // Halo pulsante solo para inundación.
+      map.addLayer({ id: 'halo', type: 'circle', source: 'gauges', filter: ['>=', ['get', 'rank'], 3],
+        paint: { 'circle-color': color, 'circle-radius': 14, 'circle-opacity': 0.25, 'circle-blur': 0.6 } });
+      map.addLayer({ id: 'dots', type: 'circle', source: 'gauges', layout: { 'circle-sort-key': ['get', 'rank'] },
+        paint: {
+          'circle-color': color,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, ['match', ['get', 'rank'], 0, 2.5, 1, 3.5, 6], 10, ['match', ['get', 'rank'], 0, 5, 1, 6, 10]],
+          'circle-stroke-color': ['case', ['>=', ['get', 'rank'], 2], '#10243a', '#ffffff'],
+          'circle-stroke-width': ['case', ['>=', ['get', 'rank'], 2], 1.5, 1],
+          'circle-opacity': ['case', ['==', ['get', 'rank'], 0], 0.6, 0.95],
+        } });
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const t0 = performance.now();
+        const pulse = (t: number) => {
+          const k = ((t - t0) % 1800) / 1800;
+          map.setPaintProperty('halo', 'circle-radius', 8 + k * 16);
+          map.setPaintProperty('halo', 'circle-opacity', 0.45 * (1 - k));
+          requestAnimationFrame(pulse);
+        };
+        requestAnimationFrame(pulse);
+      }
+    });
+    map.on('mouseenter', 'dots', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'dots', () => (map.getCanvas().style.cursor = ''));
+    map.on('click', 'dots', (e: any) => {
+      const f = e.features![0];
+      const p = f.properties as { slug: string; name: string; status: string; stage: number | null | string };
+      const stage = p.stage == null || p.stage === 'null' ? null : Number(p.stage);
+      new maplibregl.Popup({ className: 'gpop', maxWidth: '260px', offset: 10 })
+        .setLngLat((f.geometry as any).coordinates)
+        .setHTML(`<span class="gpop-pill" style="--c:${COLORS[p.status]}">${LABELS[p.status]}</span>
+          <strong class="gpop-name">${esc(p.name)}</strong>
+          <span class="gpop-stage">${fmt(stage)}</span>
+          <a class="gpop-link" href="/gauge/${p.slug}/">View gauge →</a>`)
+        .addTo(map);
+    });
   }, { rootMargin: '300px' }).observe(mapEl);
 </script>
 
@@ -359,10 +405,17 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
   .trend.rising { color: #b00020; }
   .card-meta { font-size: 0.82rem; color: var(--muted); }
 
-  .map { height: clamp(20rem, 60vh, 32rem); border: 1px solid var(--rule); border-radius: 6px; background: var(--water-tint); z-index: 0; }
+  .map { height: clamp(22rem, 62vh, 34rem); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: #f2f3f0; box-shadow: 0 10px 30px rgb(16 36 58 / 0.08); }
+  .map :global(.gpop .maplibregl-popup-content) { font: 400 0.9rem/1.35 var(--body); color: var(--ink); padding: 0.8rem 0.95rem; border-radius: 10px; box-shadow: 0 10px 28px rgb(16 36 58 / 0.22); display: grid; gap: 0.25rem; }
+  .map :global(.gpop-pill) { justify-self: start; font: 700 0.68rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.28rem 0.5rem; border-radius: 99px; background: var(--c); color: var(--ink); }
+  .map :global(.gpop-name) { font: 700 1.15rem/1.1 var(--display); text-transform: uppercase; padding-right: 1rem; }
+  .map :global(.gpop-stage) { font: 800 1.5rem/1 var(--display); }
+  .map :global(.gpop-link) { font-weight: 600; color: var(--water-deep); }
+  .map :global(.maplibregl-popup-close-button) { font-size: 1.2rem; padding: 0 0.4rem; color: var(--muted); }
   .map-loading { padding: 1rem; color: var(--muted); }
-  .legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; list-style: none; margin: 0.6rem 0 0; padding: 0; font-size: 0.85rem; color: var(--muted); }
-  .legend li { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0.75rem 0 0; padding: 0; font-size: 0.82rem; }
+  .legend li { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.65rem; background: var(--card); border: 1px solid var(--rule); border-radius: 99px; }
+  .legend .dot.pulse { box-shadow: 0 0 6px 2px var(--g); }
 
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); gap: 0.85rem; list-style: none; margin: 0; padding: 0; }
   .state { display: grid; grid-template-columns: auto 1fr; gap: 0 1rem; align-items: center; padding: 1rem 1.1rem; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; text-decoration: none; color: var(--ink); }
