@@ -12,6 +12,10 @@ on:
         description: 'Run metadata + classify too'
         type: boolean
         default: false
+      extras:
+        description: 'Only run cameras + flow normals (no levels)'
+        type: boolean
+        default: false
 concurrency:
   group: ingest
   cancel-in-progress: false
@@ -37,6 +41,9 @@ jobs:
       - name: Metadata + classify (daily)
         if: github.event.schedule == '17 9 * * *' || inputs.full
         run: npm run db:schema && npm run ingest:meta && npm run ingest:classify && (npm run ingest:cameras || echo 'cameras failed') && (npm run ingest:normals || echo 'normals failed')
+      - name: Cameras + flow normals only (manual)
+        if: inputs.extras
+        run: npm run db:schema && npm run ingest:cameras && npm run ingest:normals
       - run: npm run ingest:levels
       - run: npm run ingest:alerts
       - run: npm run ingest:forecasts
