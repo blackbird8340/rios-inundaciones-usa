@@ -66,6 +66,7 @@ const jsonLd = [
         </li>
       ))}
     </ul>
+    <p class="small">Long-term flood risk for a specific address: <a href={`https://msc.fema.gov/portal/search?AddressQuery=${encodeURIComponent(`${town.name}, ${state.code}`)}`} rel="noopener">FEMA Flood Map Service Center</a>.</p>
     <p class="small muted">Distances are straight-line from the center of {town.name}. A gauge measures the river at one spot; conditions can differ along your street.</p>
   </section>
   <Glossary ids={['action', 'minor', 'moderate', 'major', 'warning', 'watch']} />

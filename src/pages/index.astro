@@ -137,7 +137,7 @@ const jsonLd = [
 
   <section class="block" aria-labelledby="map-h">
     <h2 id="map-h">Map of gauges</h2>
-    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category; numbers are clusters of nearby gauges. Use the checkboxes to filter by status or add NWS flood alert areas and radar.</p>
+    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category; numbers are clusters of nearby gauges. Use the checkboxes to filter by status or add NWS flood alert areas, radar, yesterday’s NASA satellite image and FEMA flood zones.</p>
     <div id="map" class="map" role="region" aria-label="Map of river gauges"><p class="map-loading">Loading map…</p></div>
     <div class="map-controls">
       <fieldset class="legend">
@@ -149,6 +149,8 @@ const jsonLd = [
       <fieldset class="layers">
         <legend class="sr">Map layers</legend>
         <label><input type="checkbox" data-layer="alerts-fill,alerts-line" checked />NWS flood alerts</label>
+        <label><input type="checkbox" data-layer="nasa" />Satellite (NASA, yesterday)</label>
+        <label><input type="checkbox" data-layer="fema" data-zoom="11" />FEMA flood zones (zoom in)</label>
         <label><input type="checkbox" data-layer="radar" />Radar</label>
       </fieldset>
       <p id="alerts-note" class="small muted" aria-live="polite"></p>
@@ -334,6 +336,13 @@ const jsonLd = [
     const active = new Set(Object.keys(order));
     const filtered = () => toFc(rows.filter((r) => active.has(r[8])));
     map.on('load', () => {
+      // Satélite NASA GIBS (VIIRS color real) de ayer en UTC: la imagen del día suele completarse tarde.
+      const sat = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+      map.addSource('nasa', { type: 'raster', tiles: [`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${sat}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`], tileSize: 256, maxzoom: 9, attribution: `Satellite ${sat}: <a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a>` });
+      map.addLayer({ id: 'nasa', type: 'raster', source: 'nasa', paint: { 'raster-opacity': 0.85 }, layout: { visibility: 'none' } });
+      // Zonas de inundación FEMA (NFHL capa 28), solo con zoom: el servicio exporta imágenes por bbox.
+      map.addSource('fema', { type: 'raster', tiles: ['https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:28&f=image'], tileSize: 256, minzoom: 11, attribution: 'Flood zones: <a href="https://msc.fema.gov/">FEMA NFHL</a>' });
+      map.addLayer({ id: 'fema', type: 'raster', source: 'fema', minzoom: 11, paint: { 'raster-opacity': 0.6 }, layout: { visibility: 'none' } });
       map.addSource('radar', { type: 'raster', tiles: ['https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png'], tileSize: 256, attribution: 'Radar: <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>' });
       map.addLayer({ id: 'radar', type: 'raster', source: 'radar', paint: { 'raster-opacity': 0.6 }, layout: { visibility: 'none' } });
       map.addSource('alerts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Alerts: <a href="https://www.weather.gov/">NWS</a>' });
@@ -408,6 +417,11 @@ const jsonLd = [
     }));
     document.querySelectorAll<HTMLInputElement>('.layers input[data-layer]').forEach((cb) => cb.addEventListener('change', () => {
       for (const id of cb.dataset.layer!.split(',')) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none');
+      const z = Number(cb.dataset.zoom ?? 0);
+      if (cb.checked && z && map.getZoom() < z) {
+        const note = document.getElementById('alerts-note');
+        if (note) note.textContent = `FEMA flood zones appear at street level: zoom in on a town (or tap a gauge and zoom).`;
+      }
     }));
   }, { rootMargin: '300px' }).observe(mapEl);
 </script>
