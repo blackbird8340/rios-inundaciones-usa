@@ -63,6 +63,7 @@ export async function getGaugePage(slug: string) {
     downstream: (neighbors as any[]).map((n) => ({ ...n, name: cleanName(n.name) })).find((n) => n.lid === g.downstream_lid) ?? null,
     lastObservation: (lastObs as any[])[0] ?? null,
     camera: ((cams as any[])[0] ?? null) as Camera | null,
+    normals: await flowNormalsFor(g.usgs_id, g.time_zone),
   };
 }
 
@@ -192,4 +193,26 @@ export async function listCameras() {
      FROM cameras c JOIN gauges g ON g.usgs_id = c.usgs_id ORDER BY g.state_code, g.name`,
   );
   return (rows as any[]).map((r) => ({ ...r, gauge_name: cleanName(r.gauge_name) }));
+}
+
+export type FlowNormals = { doy: string; p05: number | null; p10: number | null; p25: number | null; p50: number | null; p75: number | null; p90: number | null; p95: number | null; years: number | null };
+
+// Percentiles de caudal del día de hoy (fecha local del medidor; 02-29 cae en 02-28 si falta).
+export async function flowNormalsFor(usgsId: string | null, tz: string | null): Promise<FlowNormals | null> {
+  if (!usgsId) return null;
+  let zone = 'America/New_York';
+  try { if (tz && tz.includes('/')) { new Intl.DateTimeFormat('en', { timeZone: tz }); zone = tz; } } catch { /* zona inválida */ }
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: zone, month: '2-digit', day: '2-digit' }).format(new Date());
+  const doy = parts.replace('/', '-');
+  try {
+    const [rows] = await db().execute<any[]>(
+      'SELECT doy, p05, p10, p25, p50, p75, p90, p95, years FROM flow_normals WHERE usgs_id = ? AND doy IN (?, ?) ORDER BY doy = ? DESC LIMIT 1',
+      [usgsId, doy, '02-28', doy],
+    );
+    const r = (rows as any[])[0];
+    if (!r || r.p50 == null) return null;
+    return r as FlowNormals;
+  } catch {
+    return null; // tabla todavía sin crear: no rompe la página
+  }
 }
