@@ -2,7 +2,7 @@
 // La "escala": impactos, umbrales de categoría y cresta récord ordenados por altura,
 // con el nivel actual como línea de agua. Lo que queda debajo del agua ya está pasando.
 // Los niveles muy por encima del río quedan plegados para no enterrar la línea de agua en móvil.
-import { statusFor, type Categories } from '../lib/flood.ts';
+import { STATUS_META, statusFor, type Categories } from '../lib/flood.ts';
 
 interface Props {
   categories: Categories;
@@ -53,15 +53,31 @@ const colorFor = (s: number) => {
 const trendWord = trend === 'rising' || trend === 'falling' || trend === 'steady' ? trend : '';
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const isUnder = (r: Rung) => stage != null && r.stage <= stage;
+// Simulador integrado: mover el deslizador marca qué niveles quedarían bajo el agua a otra altura.
+const levels = rungs.map((r) => r.stage);
+const lo = Math.floor(Math.min(...levels, stage ?? Infinity) - 2);
+const hi = Math.ceil(Math.max(...levels, stage ?? -Infinity) + 2);
+const start = stage != null ? Math.min(hi, Math.max(lo, stage)) : (categories.minor_ft ?? levels[0] ?? 0);
+const simData = JSON.stringify({ ...categories, labels: Object.fromEntries(Object.entries(STATUS_META).map(([k, m]) => [k, m.label])) });
 ---
 {rungs.length > 0 && (
-  <div class="ladder">
+  <div class="ladder" data-cats={simData} data-now={stage ?? ''}>
+    {rungs.length >= 2 && (
+      <div class="sim">
+        <label>
+          <span class="sim-h">What if the river reached <output>{start.toFixed(1)} ft</output>? <span class="st"></span></span>
+          <input type="range" min={lo} max={hi} step="0.1" value={start.toFixed(1)} aria-label="Simulate a river height in feet" />
+        </label>
+        <p class="sim-sum small" aria-live="polite">Drag to simulate other heights. Shaded levels flood at the selected height.</p>
+        <button type="button" class="sim-reset small" hidden>Back to current level</button>
+      </div>
+    )}
     {hidden.length > 0 && (
       <details class="more">
         <summary>Show {hidden.length} higher levels, up to {fmt(hidden[0].stage)} ft</summary>
         <ol aria-label="Higher flood levels">
           {hidden.map((r) => (
-            <li class:list={['rung', `rung--${r.kind}`]} style={`--cat: ${colorFor(r.stage)}`}>
+            <li data-v={r.stage} class:list={['rung', `rung--${r.kind}`]} style={`--cat: ${colorFor(r.stage)}`}>
               <span class="stage">{fmt(r.stage)}<small>ft</small></span>
               <span class="body">{r.tag && <span class="tag">{r.tag}</span>}{r.text}</span>
             </li>
@@ -78,7 +94,7 @@ const isUnder = (r: Rung) => stage != null && r.stage <= stage;
               <span class="body"><strong>River is here now</strong>{trendWord && <> · {trendWord}</>}. Everything below this line is happening at the current level.</span>
             </li>
           )}
-          <li class:list={['rung', `rung--${r.kind}`, { under: isUnder(r) }]} style={`--cat: ${colorFor(r.stage)}`}>
+          <li data-v={r.stage} class:list={['rung', `rung--${r.kind}`, { under: isUnder(r) }]} style={`--cat: ${colorFor(r.stage)}`}>
             <span class="stage">{fmt(r.stage)}<small>ft</small></span>
             <span class="body">{r.tag && <span class="tag">{r.tag}</span>}{r.text}</span>
           </li>
@@ -94,7 +110,56 @@ const isUnder = (r: Rung) => stage != null && r.stage <= stage;
   </div>
 )}
 
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('.ladder[data-cats]')) {
+    const input = root.querySelector<HTMLInputElement>('.sim input');
+    if (!input) continue;
+    const c = JSON.parse(root.dataset.cats!);
+    const now = root.dataset.now === '' ? null : Number(root.dataset.now);
+    const out = root.querySelector('.sim output')!;
+    const st = root.querySelector<HTMLElement>('.sim .st')!;
+    const sum = root.querySelector<HTMLElement>('.sim-sum')!;
+    const reset = root.querySelector<HTMLButtonElement>('.sim-reset')!;
+    const more = root.querySelector<HTMLDetailsElement>('details.more');
+    const rungs = [...root.querySelectorAll<HTMLLIElement>('li.rung')];
+    const status = (v: number) =>
+      c.major_ft != null && v >= c.major_ft ? 'major' : c.moderate_ft != null && v >= c.moderate_ft ? 'moderate'
+      : c.minor_ft != null && v >= c.minor_ft ? 'minor' : c.action_ft != null && v >= c.action_ft ? 'action' : 'normal';
+    let touched = false;
+    const update = () => {
+      const v = Number(input.value);
+      const s = status(v);
+      out.textContent = `${v.toFixed(1)} ft`;
+      st.textContent = c.labels[s];
+      st.style.setProperty('--c', `var(--cat-${s})`);
+      let n = 0;
+      for (const li of rungs) {
+        const on = Number(li.dataset.v) <= v;
+        li.classList.toggle('under', on);
+        if (on && li.classList.contains('rung--impact')) n++;
+        if (on && more && li.closest('details.more')) more.open = true;
+      }
+      if (touched) {
+        sum.textContent = n ? `At ${v.toFixed(1)} ft: ${n} listed impact${n === 1 ? '' : 's'} (shaded).` : `At ${v.toFixed(1)} ft: no listed impacts.`;
+        reset.hidden = now == null || Math.abs(v - now) < 0.05;
+        root.classList.toggle('simulating', now == null || Math.abs(v - now) >= 0.05);
+      }
+    };
+    input.addEventListener('input', () => { touched = true; update(); });
+    reset.addEventListener('click', () => { if (now != null) input.value = String(now); update(); reset.hidden = true; root.classList.remove('simulating'); sum.textContent = 'Back at the current level.'; });
+    update();
+  }
+</script>
+
 <style>
+  .sim { padding: 0.9rem 1rem; border-bottom: 1px solid var(--rule); background: var(--water-tint, #eef5f8); display: grid; gap: 0.35rem; }
+  .sim label { display: grid; gap: 0.4rem; font-weight: 600; }
+  .sim output { font: 800 1.4rem/1 var(--display); }
+  .sim .st { font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.3rem 0.5rem; border-radius: 99px; background: var(--c); vertical-align: middle; }
+  .sim input[type=range] { width: 100%; accent-color: var(--water-deep); min-height: 2rem; }
+  .sim-sum { margin: 0; color: var(--muted); }
+  .sim-reset { justify-self: start; background: none; border: 1px solid var(--rule); border-radius: 99px; padding: 0.25rem 0.7rem; cursor: pointer; color: var(--water-deep); }
+  .simulating .waterline { opacity: 0.55; }
   ol { list-style: none; margin: 0; padding: 0; }
   .ladder {
     background: var(--card);
