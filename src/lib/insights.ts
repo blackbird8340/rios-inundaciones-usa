@@ -9,21 +9,23 @@ export type RisingRow = {
 };
 
 // Mayor subida en 24 h: último dato (de las últimas 3 h) contra la lectura más cercana a 24 h antes,
-// tomada entre 22 y 26 h antes (si no hay lectura en esa ventana, el medidor queda afuera).
+// tomada entre 22 y 26 h antes (ventana con ROW_NUMBER: TiDB no admite subconsultas en ON) (si no hay lectura en esa ventana, el medidor queda afuera).
 // Solo medidores de río (gauge_type, ver scripts/ingest/classify.ts): embalses y marea quedan afuera.
 export async function getRisingFastest(limit = 10): Promise<RisingRow[]> {
   const since = new Date(Date.now() - 3 * 3600_000);
   const [rows] = await db().execute<any[]>(
-    `SELECT g.slug, g.name, g.state_code, g.status, g.stage_ft, g.observed_at, o.stage_ft ref_ft, o.observed_at ref_at,
-            g.stage_ft - o.stage_ft rise_ft
+    `SELECT g.slug, g.name, g.state_code, g.status, g.stage_ft, g.observed_at, ref.ref_ft, ref.ref_at,
+            g.stage_ft - ref.ref_ft rise_ft
      FROM gauges g
-     JOIN observations o ON o.gauge_id = g.id AND o.observed_at = (
-       SELECT o2.observed_at FROM observations o2
-       WHERE o2.gauge_id = g.id
-         AND o2.observed_at BETWEEN g.observed_at - INTERVAL 26 HOUR AND g.observed_at - INTERVAL 22 HOUR
-       ORDER BY ABS(TIMESTAMPDIFF(SECOND, o2.observed_at, g.observed_at - INTERVAL 24 HOUR)) LIMIT 1)
-     WHERE g.stage_ft IS NOT NULL AND g.observed_at >= ? AND g.gauge_type = 'river'
-       AND g.stage_ft - o.stage_ft > 0.05
+     JOIN (
+       SELECT o.gauge_id, o.stage_ft ref_ft, o.observed_at ref_at,
+              ROW_NUMBER() OVER (PARTITION BY o.gauge_id
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, o.observed_at, g2.observed_at - INTERVAL 24 HOUR))) rn
+       FROM observations o JOIN gauges g2 ON g2.id = o.gauge_id
+       WHERE g2.observed_at >= ? AND g2.stage_ft IS NOT NULL
+         AND o.observed_at BETWEEN g2.observed_at - INTERVAL 26 HOUR AND g2.observed_at - INTERVAL 22 HOUR
+     ) ref ON ref.gauge_id = g.id AND ref.rn = 1
+     WHERE g.gauge_type = 'river' AND g.stage_ft - ref.ref_ft > 0.05
      ORDER BY rise_ft DESC LIMIT ${Math.max(1, Math.min(100, Math.floor(limit)))}`,
     [since],
   );
