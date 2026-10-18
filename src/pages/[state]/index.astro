@@ -1,36 +1,73 @@
 ---
 import Base from '../../layouts/Base.astro';
 import AreaPage from '../../components/AreaPage.astro';
+import Glossary from '../../components/Glossary.astro';
 import { getStatePage, listCounties } from '../../lib/queries.ts';
+import { getRisingFastest } from '../../lib/insights.ts';
+import { townsWithGauges } from '../../lib/towns.ts';
+import { siteOrigin } from '../../lib/site.ts';
 const data = await getStatePage(Astro.params.state!);
 if (!data) return new Response(null, { status: 404 });
 const { state, gauges } = data;
-const counties = await listCounties(state.code);
+const [counties, risingAll] = await Promise.all([listCounties(state.code), getRisingFastest(100)]);
+const rising = risingAll.filter((r) => r.state_code === state.code).slice(0, 5);
+const towns = townsWithGauges(state.code, gauges);
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 const path = `/${state.slug}/`;
-const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
+const origin = siteOrigin(Astro.url.origin);
+const flooding = gauges.filter((g) => ['minor', 'moderate', 'major'].includes(g.status)).length;
+const action = gauges.filter((g) => g.status === 'action').length;
+const watchCounties = counties.filter((c) => c.flooding > 0);
+const verdict = flooding
+  ? `${flooding} river gauge${flooding === 1 ? ' is' : 's are'} above flood stage in ${state.name} right now${action ? `, and ${action} more at action stage` : ''}.`
+  : action ? `No river in ${state.name} is flooding, but ${action} gauge${action === 1 ? ' is' : 's are'} at action stage (close to flood stage).`
+  : `No river gauge in ${state.name} is at or above action stage right now.`;
 const jsonLd = [
   { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: state.name, item: origin + path }] },
   { '@context': 'https://schema.org', '@type': 'Dataset', name: `${state.name} river levels and flood stages`, url: origin + path, isAccessibleForFree: true,
     description: `Current stage and NWS flood category for ${gauges.length} river gauges in ${state.name}.`, spatialCoverage: state.name,
     creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey' }, { '@type': 'Organization', name: 'NOAA National Weather Service' }] },
+  { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: `Is there flooding in ${state.name} today?`, acceptedAnswer: { '@type': 'Answer', text: verdict } }] },
 ];
 ---
-<Base title={`${state.name} River Levels Today – Flood Stages & Forecasts`} description={`Live river levels for ${gauges.length} gauges in ${state.name}: which rivers are at action stage or flooding now, by river.`} canonicalPath={path} jsonLd={jsonLd}>
+<Base title={`${state.name} River Levels & Flooding Today – Flood Stages, Forecasts`} description={`${verdict} Live levels for ${gauges.length} gauges by river, county and town.`} canonicalPath={path} jsonLd={jsonLd}>
   <ol class="crumbs" slot="crumbs"><li><a href={path}>{state.name}</a></li></ol>
-  <AreaPage heading={`${state.name} river levels`} lede={`Live readings from ${gauges.length} river gauges in ${state.name}, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river">
+  <AreaPage heading={`${state.name} river levels`} lede={`${verdict} Live readings from ${gauges.length} river gauges, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river">
+    <div class="quick">
+      <a class="q" href="/flooding-now/"><strong>{flooding}</strong><span>above flood stage</span></a>
+      <a class="q" href="#counties-h"><strong>{watchCounties.length}</strong><span>counties with flooding</span></a>
+      <a class="q" href="/alerts/"><strong>NWS</strong><span>flood alerts</span></a>
+      <a class="q" href="/webcams/"><strong>Live</strong><span>river cameras</span></a>
+    </div>
+    {rising.length > 0 && (
+      <section class="rs"><h2>Rising fastest in {state.name} (24 h)</h2>
+        <ol>{rising.map((r) => <li><a href={`/gauge/${r.slug}/`}>{r.name}</a> <span class="muted small">+{Number(r.rise_ft).toFixed(1)} ft · now {Number(r.stage_ft).toFixed(1)} ft</span></li>)}</ol>
+      </section>
+    )}
   </AreaPage>
   <section class="counties" aria-labelledby="counties-h">
     <h2 id="counties-h">{state.name} flooding by county</h2>
-    <ul>
+    <ul class="cols">
       {counties.map((c) => <li><a href={`/${state.slug}/${c.slug}/`}>{c.county_name} County</a> <span class="muted small">{c.n}{c.flooding ? ` · ${c.flooding} flooding` : ''}</span></li>)}
     </ul>
   </section>
+  <section class="counties" aria-labelledby="towns-h">
+    <h2 id="towns-h">Is my town flooding? {towns.length} {state.name} towns</h2>
+    <details><summary>Show all towns with a river gauge within 6 miles</summary>
+      <ul class="cols">{towns.map((t) => <li><a href={`/${state.slug}/town/${t.slug}/`}>{t.name}</a></li>)}</ul>
+    </details>
+  </section>
+  <Glossary ids={['action', 'minor', 'moderate', 'major', 'crest', 'stage']} />
 </Base>
-
 <style>
+  .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.6rem; margin-top: 1.2rem; }
+  .q { display: grid; background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 0.7rem 0.9rem; color: inherit; text-decoration: none; }
+  .q strong { font: 800 1.8rem/1 var(--display); }
+  .q span { font-size: 0.85rem; color: var(--muted); }
+  .rs { margin-top: 2rem; } .rs h2 { margin-bottom: 0.5rem; } .rs ol { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.3rem; }
   .counties { margin-top: 3rem; }
   .counties h2 { margin-bottom: 0.75rem; }
-  .counties ul { list-style: none; padding: 0; margin: 0; columns: 14rem; column-gap: 1.5rem; }
-  .counties li { break-inside: avoid; padding: 0.3rem 0; border-bottom: 1px solid var(--rule); }
+  .counties summary { cursor: pointer; font-weight: 600; margin-bottom: 0.6rem; }
+  .cols { list-style: none; padding: 0; margin: 0; columns: 14rem; column-gap: 1.5rem; }
+  .cols li { break-inside: avoid; padding: 0.3rem 0; border-bottom: 1px solid var(--rule); }
 </style>

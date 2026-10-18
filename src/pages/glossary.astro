@@ -1,0 +1,16 @@
+---
+import Base from '../layouts/Base.astro';
+import Glossary from '../components/Glossary.astro';
+import { GLOSSARY } from '../lib/glossary.ts';
+import { siteOrigin } from '../lib/site.ts';
+const origin = siteOrigin(Astro.url.origin);
+const jsonLd = [{ '@context': 'https://schema.org', '@type': 'DefinedTermSet', name: 'Flood and river level glossary', url: `${origin}/glossary/`,
+  hasDefinedTerm: GLOSSARY.map((g) => ({ '@type': 'DefinedTerm', name: g.term, description: g.text, url: `${origin}/glossary/#term-${g.id}` })) }];
+---
+<Base title="Flood Stage, Action Stage, Crest: Plain-English Flood Glossary" description="What action stage, flood stage, minor, moderate and major flooding, crest, cfs and Flood Watch vs Warning mean, in plain English." canonicalPath="/glossary/" jsonLd={jsonLd}>
+  <ol class="crumbs" slot="crumbs"><li><a href="/glossary/">Glossary</a></li></ol>
+  <h1 class="h">Flood words, in plain English</h1>
+  <p class="muted">The terms the National Weather Service and USGS use on river gauges, explained without jargon.</p>
+  <Glossary heading="Glossary" />
+</Base>
+<style>.h { font: 800 clamp(2.2rem, 7vw, 3.6rem)/0.95 var(--display); text-transform: uppercase; margin: 1.5rem 0 0.6rem; }</style>

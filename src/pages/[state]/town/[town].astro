@@ -1,0 +1,86 @@
+---
+// Página de pueblo: "¿Se inunda <pueblo>?" con los medidores más cercanos, alertas del condado y glosario.
+import Base from '../../../layouts/Base.astro';
+import GaugeCards from '../../../components/GaugeCards.astro';
+import Glossary from '../../../components/Glossary.astro';
+import { countySlug, getStatePage } from '../../../lib/queries.ts';
+import { db } from '../../../lib/db.ts';
+import { findTown, miles, TOWN_RADIUS_MI } from '../../../lib/towns.ts';
+import { STATUS_META, type FloodStatus } from '../../../lib/flood.ts';
+import { ft, ago } from '../../../lib/format.ts';
+import { siteOrigin } from '../../../lib/site.ts';
+
+const data = await getStatePage(Astro.params.state!);
+const town = data ? findTown(data.state.code, Astro.params.town!) : null;
+if (!data || !town) return new Response(null, { status: 404 });
+const near = data.gauges
+  .map((g) => ({ g, d: miles(town.lat, town.lon, g.lat, g.lon) }))
+  .filter((x) => x.d <= 15).sort((a, b) => a.d - b.d).slice(0, 8);
+if (!near.length || near[0].d > TOWN_RADIUS_MI) return new Response(null, { status: 404 });
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const { state } = data;
+const rank: Record<FloodStatus, number> = { major: 5, moderate: 4, minor: 3, action: 2, normal: 1, no_data: 0 };
+const worst = near.reduce((w, x) => (rank[x.g.status as FloodStatus] > rank[w] ? (x.g.status as FloodStatus) : w), 'no_data' as FloodStatus);
+const flooding = near.filter((x) => rank[x.g.status as FloodStatus] >= 3);
+const counties = [...new Set(near.filter((x) => x.d <= TOWN_RADIUS_MI).map((x) => x.g.county_name).filter(Boolean))] as string[];
+const [alertRows] = await db().execute<any[]>(
+  `SELECT DISTINCT a.event FROM alerts a JOIN alert_counties ac ON ac.alert_id = a.id JOIN gauges g ON g.county_fips = ac.county_fips
+   WHERE g.state_code = ? AND g.county_name IN (${counties.map(() => '?').join(',') || "''"}) AND (a.expires_at IS NULL OR a.expires_at > NOW())`,
+  [state.code, ...counties],
+);
+const events = (alertRows as any[]).map((r) => r.event as string);
+const answer = flooding.length
+  ? `Yes: ${flooding.length} river gauge${flooding.length === 1 ? '' : 's'} near ${town.name} ${flooding.length === 1 ? 'is' : 'are'} above flood stage (${STATUS_META[worst].label.toLowerCase()}).`
+  : worst === 'action'
+    ? `Not yet, but a river near ${town.name} is at action stage (close to flood stage).`
+    : worst === 'no_data' ? `We have no recent readings near ${town.name}.` : `No. Rivers near ${town.name} are below flood stage right now.`;
+const latest = near.reduce<Date | null>((m, x) => (x.g.observed_at && (!m || x.g.observed_at > m) ? x.g.observed_at : m), null);
+const path = `/${state.slug}/town/${town.slug}/`;
+const origin = siteOrigin(Astro.url.origin);
+const jsonLd = [
+  { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
+    { '@type': 'ListItem', position: 1, name: state.name, item: `${origin}/${state.slug}/` },
+    { '@type': 'ListItem', position: 2, name: town.name, item: origin + path } ] },
+  { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: `Is ${town.name}, ${state.code} flooding today?`, acceptedAnswer: { '@type': 'Answer', text: answer } }] },
+];
+---
+<Base title={`Is ${town.name}, ${state.code} Flooding? River Levels Near ${town.name} Today`} description={`${answer} Live levels at the ${near.length} nearest river gauges, flood stages and NWS alerts for ${town.name}, ${state.name}.`} canonicalPath={path} jsonLd={jsonLd}>
+  <ol class="crumbs" slot="crumbs"><li><a href={`/${state.slug}/`}>{state.name}</a></li><li><a href={path}>{town.name}</a></li></ol>
+  <section class="hero" style={`--status: var(--cat-${worst})`}>
+    <p class="eyebrow">Flooding near {town.name}, {state.name}</p>
+    <h1>Is {town.name} flooding?</h1>
+    <p class="answer">{answer}</p>
+    {events.length > 0 && <p class="alert">NWS alert{events.length > 1 ? 's' : ''} for this area: <a href="/alerts/">{events.join(', ')}</a></p>}
+    {latest && <p class="small muted">Latest reading {ago(latest)}. Counties: {counties.map((c, i) => <>{i > 0 && ', '}<a href={`/${state.slug}/${countySlug(c)}/`}>{c} County</a></>)}</p>}
+  </section>
+  {flooding.length > 0 && <section class="b"><h2>Above flood stage nearby</h2><GaugeCards gauges={flooding.map((x) => x.g)} /></section>}
+  <section class="b">
+    <h2>Nearest river gauges</h2>
+    <ul class="near">
+      {near.map(({ g, d }) => (
+        <li>
+          <span class="dot" style={`background:var(--cat-${g.status})`}></span>
+          <a href={`/gauge/${g.slug}/`}>{g.name}</a>
+          <span class="lvl">{ft(g.stage_ft)}</span>
+          <span class="small muted">{STATUS_META[g.status as FloodStatus].label} · {d.toFixed(1)} mi{g.minor_ft != null && g.stage_ft != null ? ` · flood stage ${ft(g.minor_ft, 0)}` : ''}</span>
+        </li>
+      ))}
+    </ul>
+    <p class="small muted">Distances are straight-line from the center of {town.name}. A gauge measures the river at one spot; conditions can differ along your street.</p>
+  </section>
+  <Glossary ids={['action', 'minor', 'moderate', 'major', 'warning', 'watch']} />
+</Base>
+<style>
+  .hero { padding-block: clamp(1.5rem, 5vw, 3rem) 0.5rem; border-left: 8px solid var(--status); padding-left: 1rem; margin-top: 1rem; }
+  .eyebrow { font: 700 0.8rem/1.3 var(--body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  h1 { font: 800 clamp(2.4rem, 8vw, 4rem)/0.95 var(--display); text-transform: uppercase; margin: 0.3rem 0 0.8rem; }
+  .answer { font-size: clamp(1.15rem, 2.5vw, 1.5rem); font-weight: 600; max-width: 46ch; }
+  .alert { margin-top: 0.6rem; padding: 0.5rem 0.8rem; background: #fff1f1; border: 1px solid var(--cat-moderate); border-radius: 6px; }
+  .b { margin-top: 2rem; } .b h2 { margin-bottom: 0.7rem; }
+  .near { list-style: none; padding: 0; margin: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 8px; }
+  .near li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.2rem 0.6rem; align-items: center; padding: 0.6rem 1rem; border-top: 1px solid var(--rule); }
+  .near li:first-child { border-top: 0; }
+  .near .small { grid-column: 2 / 4; }
+  .dot { width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 1px solid rgb(0 0 0 / 0.25); }
+  .lvl { font: 800 1.1rem var(--display); }
+</style>
