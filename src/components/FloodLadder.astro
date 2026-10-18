@@ -65,13 +65,15 @@ const simData = JSON.stringify({ ...categories, labels: Object.fromEntries(Objec
     {rungs.length >= 2 && (
       <div class="sim">
         <label>
-          <span class="sim-h">What if the river reached <output>{start.toFixed(1)} ft</output>? <span class="st"></span></span>
+          <span class="sim-h">What if the river reached…<span class="sim-v"><output>{start.toFixed(1)} ft</output><span class="st"></span></span></span>
           <input type="range" min={lo} max={hi} step="0.1" value={start.toFixed(1)} aria-label="Simulate a river height in feet" />
         </label>
-        <p class="sim-sum small" aria-live="polite">Drag to simulate other heights. Shaded levels flood at the selected height.</p>
-        <button type="button" class="sim-reset small" hidden>Back to current level</button>
+        <p class="sim-sum small" aria-live="polite">Drag to raise or lower the water and see what floods at each height.</p>
+        <button type="button" class="sim-reset small" data-off>Back to current level</button>
       </div>
     )}
+    <div class="lad-body">
+      <div class="simwater" aria-hidden="true"></div>
     {hidden.length > 0 && (
       <details class="more">
         <summary>Show {hidden.length} higher levels, up to {fmt(hidden[0].stage)} ft</summary>
@@ -107,47 +109,89 @@ const simData = JSON.stringify({ ...categories, labels: Object.fromEntries(Objec
         </li>
       )}
     </ol>
+    </div>
   </div>
 )}
 
 <script>
+  // Simulador: el agua animada (la misma de "River is here now") sube por la escala hasta la altura elegida.
+  // Layout fijo durante el arrastre: los niveles plegados se abren una sola vez al empezar a interactuar,
+  // las posiciones se miden una vez (y al cambiar el tamaño) y el agua se mueve solo con transform + rAF.
   for (const root of document.querySelectorAll<HTMLElement>('.ladder[data-cats]')) {
     const input = root.querySelector<HTMLInputElement>('.sim input');
     if (!input) continue;
     const c = JSON.parse(root.dataset.cats!);
     const now = root.dataset.now === '' ? null : Number(root.dataset.now);
+    const body = root.querySelector<HTMLElement>('.lad-body')!;
+    const water = root.querySelector<HTMLElement>('.simwater')!;
     const out = root.querySelector('.sim output')!;
     const st = root.querySelector<HTMLElement>('.sim .st')!;
     const sum = root.querySelector<HTMLElement>('.sim-sum')!;
     const reset = root.querySelector<HTMLButtonElement>('.sim-reset')!;
     const more = root.querySelector<HTMLDetailsElement>('details.more');
-    const rungs = [...root.querySelectorAll<HTMLLIElement>('li.rung')];
     const status = (v: number) =>
       c.major_ft != null && v >= c.major_ft ? 'major' : c.moderate_ft != null && v >= c.moderate_ft ? 'moderate'
       : c.minor_ft != null && v >= c.minor_ft ? 'minor' : c.action_ft != null && v >= c.action_ft ? 'action' : 'normal';
-    let touched = false;
-    const update = () => {
+    let pts: { v: number; y: number }[] = [];
+    let H = 0;
+    // Línea de agua de cada nivel = borde inferior de su fila (lo que está debajo queda bajo el agua).
+    const measure = () => {
+      const top = body.getBoundingClientRect().top;
+      H = body.offsetHeight;
+      pts = [...body.querySelectorAll<HTMLLIElement>('li.rung')]
+        .filter((li) => li.offsetParent !== null)
+        .map((li) => ({ v: Number(li.dataset.v), y: li.getBoundingClientRect().top - top }))
+        .sort((a, b) => b.v - a.v);
+    };
+    const yFor = (v: number) => {
+      if (!pts.length) return H;
+      if (v >= pts[0].v) return Math.max(0, pts[0].y - (v - pts[0].v) * 12);
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i];
+        if (v >= b.v) return a.v === b.v ? b.y : b.y + ((v - b.v) / (a.v - b.v)) * (a.y - b.y);
+      }
+      const last = pts[pts.length - 1];
+      return Math.min(H, last.y + (last.v - v) * 12 + 40);
+    };
+    let ready = false;
+    const prepare = () => {
+      if (ready) return;
+      ready = true;
+      if (more) more.open = true; // una sola vez, antes de arrastrar: nada aparece durante el arrastre
+      measure();
+      root.classList.add('sim-ready');
+    };
+    new ResizeObserver(() => { if (ready) { measure(); paint(); } }).observe(body);
+    let simulating = false, queued = false;
+    const paint = () => {
+      queued = false;
       const v = Number(input.value);
       const s = status(v);
       out.textContent = `${v.toFixed(1)} ft`;
       st.textContent = c.labels[s];
       st.style.setProperty('--c', `var(--cat-${s})`);
-      let n = 0;
-      for (const li of rungs) {
-        const on = Number(li.dataset.v) <= v;
-        li.classList.toggle('under', on);
-        if (on && li.classList.contains('rung--impact')) n++;
-        if (on && more && li.closest('details.more')) more.open = true;
-      }
-      if (touched) {
-        sum.textContent = n ? `At ${v.toFixed(1)} ft: ${n} listed impact${n === 1 ? '' : 's'} (shaded).` : `At ${v.toFixed(1)} ft: no listed impacts.`;
-        reset.hidden = now == null || Math.abs(v - now) < 0.05;
-        root.classList.toggle('simulating', now == null || Math.abs(v - now) >= 0.05);
-      }
+      if (!simulating) return;
+      water.style.transform = `translate3d(0, ${yFor(v).toFixed(1)}px, 0)`;
+      const n = pts.filter((p) => p.v <= v).length;
+      sum.textContent = n ? `At ${v.toFixed(1)} ft: ${n} level${n === 1 ? '' : 's'} under water.` : `At ${v.toFixed(1)} ft: no listed impacts.`;
+      reset.toggleAttribute('data-off', now == null || Math.abs(v - now) < 0.05);
     };
-    input.addEventListener('input', () => { touched = true; update(); });
-    reset.addEventListener('click', () => { if (now != null) input.value = String(now); update(); reset.hidden = true; root.classList.remove('simulating'); sum.textContent = 'Back at the current level.'; });
-    update();
+    const schedule = () => { if (!queued) { queued = true; requestAnimationFrame(paint); } };
+    for (const ev of ['pointerdown', 'touchstart', 'focus', 'keydown']) input.addEventListener(ev, prepare, { passive: true });
+    input.addEventListener('input', () => {
+      prepare();
+      if (!simulating) { simulating = true; root.classList.add('simulating'); }
+      schedule();
+    });
+    reset.addEventListener('click', () => {
+      if (now != null) input.value = String(now);
+      simulating = false;
+      root.classList.remove('simulating');
+      reset.toggleAttribute('data-off', true);
+      sum.textContent = 'Back at the current level.';
+      paint();
+    });
+    paint();
   }
 </script>
 
@@ -156,10 +200,42 @@ const simData = JSON.stringify({ ...categories, labels: Object.fromEntries(Objec
   .sim label { display: grid; gap: 0.4rem; font-weight: 600; }
   .sim output { font: 800 1.4rem/1 var(--display); }
   .sim .st { font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.3rem 0.5rem; border-radius: 99px; background: var(--c); vertical-align: middle; }
-  .sim input[type=range] { width: 100%; accent-color: var(--water-deep); min-height: 2rem; }
+  .sim input[type=range] { width: 100%; accent-color: var(--water-deep); }
   .sim-sum { margin: 0; color: var(--muted); }
+  .sim-h { display: grid; gap: 0.3rem; }
+  .sim-v { display: flex; align-items: center; gap: 0.6rem; white-space: nowrap; height: 1.8rem; }
+  .sim-reset[data-off] { visibility: hidden; }
   .sim-reset { justify-self: start; background: none; border: 1px solid var(--rule); border-radius: 99px; padding: 0.25rem 0.7rem; cursor: pointer; color: var(--water-deep); }
-  .simulating .waterline { opacity: 0.55; }
+  .lad-body { position: relative; overflow: hidden; }
+  /* Agua simulada: un bloque de altura completa que se desplaza con transform (sin reflow). */
+  .simwater {
+    position: absolute; left: 0; right: 0; top: 0; height: 100%; z-index: 3; pointer-events: none;
+    transform: translate3d(0, 100%, 0); opacity: 0; will-change: transform;
+    background: linear-gradient(to bottom, rgb(74 146 179 / 0.55), rgb(31 86 115 / 0.5) 40%, rgb(31 86 115 / 0.45));
+    transition: transform 0.18s ease-out, opacity 0.2s;
+  }
+  .simulating .simwater { opacity: 1; }
+  .simwater::before, .simwater::after { content: ''; position: absolute; left: 0; right: 0; background-repeat: repeat-x; }
+  .simwater::before {
+    top: -12px; height: 13px; background-size: 240px 13px; animation: drift-back 11s linear infinite;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='13' viewBox='0 0 240 13'%3E%3Cpath d='M0 7Q60 0 120 7T240 7V13H0Z' fill='%2378b3cf' fill-opacity='.6'/%3E%3C/svg%3E");
+  }
+  .simwater::after {
+    top: -9px; height: 10px; background-size: 160px 10px; animation: drift-front 7s linear infinite;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='10' viewBox='0 0 160 10'%3E%3Cpath d='M0 5Q40 0 80 5T160 5V10H0Z' fill='%234a92b3' fill-opacity='.8'/%3E%3Cpath d='M0 5Q40 0 80 5T160 5' fill='none' stroke='%23ffffff' stroke-opacity='.7' stroke-width='1.2'/%3E%3C/svg%3E");
+  }
+  .sim-ready details.more > summary { display: none; }
+  .simulating .under { background: none; }
+  .simulating .waterline { opacity: 0.5; }
+  .sim input[type=range] { -webkit-appearance: none; appearance: none; height: 2.75rem; background: transparent; touch-action: pan-y; }
+  .sim input[type=range]::-webkit-slider-runnable-track { height: 0.5rem; border-radius: 99px; background: linear-gradient(90deg, #cfe2ec, #2f6f8f); }
+  .sim input[type=range]::-moz-range-track { height: 0.5rem; border-radius: 99px; background: linear-gradient(90deg, #cfe2ec, #2f6f8f); }
+  .sim input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 1.9rem; height: 1.9rem; margin-top: -0.7rem; border-radius: 50%; background: #fff; border: 3px solid var(--water-deep); box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); }
+  .sim input[type=range]::-moz-range-thumb { width: 1.9rem; height: 1.9rem; border-radius: 50%; background: #fff; border: 3px solid var(--water-deep); box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); }
+  @media (prefers-reduced-motion: reduce) {
+    .simwater { transition: none; }
+    .simwater::before, .simwater::after { animation: none; }
+  }
   ol { list-style: none; margin: 0; padding: 0; }
   .ladder {
     background: var(--card);
@@ -191,7 +267,7 @@ const simData = JSON.stringify({ ...categories, labels: Object.fromEntries(Objec
     border-left: 6px solid var(--cat, transparent);
     border-top: 1px solid var(--rule);
   }
-  .ladder > ol:first-child li:first-child .body { border-top: 0; }
+  .lad-body > ol:first-of-type li:first-child .body { border-top: 0; }
   .more summary {
     cursor: pointer;
     padding: 0.8rem 1rem 0.8rem 6.35rem;
