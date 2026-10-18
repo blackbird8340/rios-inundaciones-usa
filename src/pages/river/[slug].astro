@@ -1,0 +1,15 @@
+---
+import Base from '../../layouts/Base.astro';
+import AreaPage from '../../components/AreaPage.astro';
+import { getRiverPage } from '../../lib/queries.ts';
+const data = await getRiverPage(Astro.params.slug!);
+if (!data) return new Response('Not found', { status: 404 });
+const { river, gauges } = data;
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const path = `/river/${river.slug}/`;
+const states = [...new Set(gauges.map((g) => g.state_code))].join(' and ');
+---
+<Base title={`${river.name} Levels Today – Gauges & Flood Stages`} description={`Live levels at ${gauges.length} gauges on the ${river.name}${states ? ` (${states})` : ''}: flood stages and current status.`} canonicalPath={path}>
+  <ol class="crumbs" slot="crumbs"><li><a href={path}>{river.name}</a></li></ol>
+  <AreaPage heading={river.name} lede={`Live readings from ${gauges.length} gauge${gauges.length === 1 ? '' : 's'} on the ${river.name}${states ? ` in ${states}` : ''}.`} gauges={gauges} groupBy="state" />
+</Base>

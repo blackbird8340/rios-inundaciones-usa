@@ -6,6 +6,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { db } from '../../lib/db.ts';
 import { STATUS_META, type FloodStatus } from '../../lib/flood.ts';
 import { fmtTime, ianaZone } from '../../lib/format.ts';
+import { cleanName } from '../../lib/slug.ts';
 
 // Tarjeta OG 1200x630 por medidor. Cache en memoria por (slug, hora de lectura).
 const require = createRequire(import.meta.url);
@@ -26,6 +27,7 @@ export const GET: APIRoute = async ({ params }) => {
     [params.slug ?? ""],
   );
   if (!g) return new Response('Not found', { status: 404 });
+  g.name = cleanName(g.name);
   const key = `${g.slug}|${g.observed_at?.getTime() ?? 0}`;
   let png = cache.get(key);
   if (!png) {

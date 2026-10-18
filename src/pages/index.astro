@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import { getHomeData, type HomeGauge } from '../lib/queries.ts';
 import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
 import { ft, fmtDate, ago } from '../lib/format.ts';
+import GaugeCards from '../components/GaugeCards.astro';
 import ImpactSlider from '../components/ImpactSlider.astro';
 import RisingList from '../components/RisingList.astro';
 import { getRisingFastest, getImpactSliderData } from '../lib/insights.ts';
@@ -30,18 +31,6 @@ const alerts = gauges
   .sort((a, b) => rank[st(b)] - rank[st(a)] || (b.stage_ft! - (b.minor_ft ?? b.action_ft ?? 0)) - (a.stage_ft! - (a.minor_ft ?? a.action_ft ?? 0)));
 
 // Mini medidor: escala de 0 a la categoría más alta conocida (+15 %), clamp 0–100 %.
-function mini(g: HomeGauge) {
-  const top = Math.max(g.major_ft ?? 0, g.moderate_ft ?? 0, g.minor_ft ?? 0, g.action_ft ?? 0, g.stage_ft ?? 0) * 1.15 || 1;
-  const pct = (v: number | null) => (v == null ? null : Math.max(0, Math.min(100, (v / top) * 100)));
-  return {
-    fill: pct(g.stage_ft) ?? 0,
-    ticks: (['action', 'minor', 'moderate', 'major'] as const)
-      .map((k) => ({ k, v: g[`${k}_ft`] }))
-      .filter((t): t is { k: typeof t.k; v: number } => t.v != null)
-      .map((t) => ({ ...t, p: pct(t.v)! })),
-  };
-}
-const trendLabel: Record<string, string> = { rising: '▲ Rising', falling: '▼ Falling', steady: '■ Steady' };
 
 const stateCards = states.map((s) => {
   const list = gauges.filter((g) => g.state_code === s.code);
@@ -107,30 +96,7 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
     {alerts.length === 0 ? (
       <p class="calm">All normal today. No gauge is at action stage or above.</p>
     ) : (
-      <ul class="cards">
-        {alerts.map((g) => {
-          const m = mini(g);
-          return (
-            <li class="card" style={`--cat: var(--cat-${st(g)})`}>
-              <a href={`/gauge/${g.slug}/`} class="card-link">
-                <span class="mini" aria-hidden="true">
-                  <span class="mini-fill" style={`height: ${m.fill}%`}></span>
-                  {m.ticks.map((t) => <span class="tick" style={`bottom: ${t.p}%; --tc: var(--cat-${t.k})`}></span>)}
-                </span>
-                <span class="card-body">
-                  <span class="pill">{STATUS_META[st(g)].label}</span>
-                  <span class="card-title">{g.river_name ?? g.name}</span>
-                  <span class="card-place">{g.place_name ?? g.name}, {g.state_code}</span>
-                  <span class="card-stage">{ft(g.stage_ft)}
-                    {g.trend && <span class:list={['trend', g.trend]}>{trendLabel[g.trend]}</span>}
-                  </span>
-                  <span class="card-meta">Flood stage {ft(g.minor_ft)}</span>
-                </span>
-              </a>
-            </li>
-          );
-        })}
-      </ul>
+      <GaugeCards gauges={alerts} />
     )}
   </section>
 
@@ -395,33 +361,6 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
   .block > h2 { margin-bottom: 0.75rem; }
   .calm { padding: 1rem 1.2rem; background: var(--card); border-left: 6px solid var(--cat-normal); border-radius: 6px; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 0.85rem; list-style: none; margin: 0; padding: 0; }
-  .card-link {
-    display: flex; gap: 0.9rem; height: 100%; padding: 0.9rem; text-decoration: none; color: var(--ink);
-    background: var(--card); border: 1px solid var(--rule); border-top: 6px solid var(--cat); border-radius: 6px;
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-  .card-link:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgb(16 36 58 / 0.12); color: var(--ink); }
-  .mini {
-    position: relative; flex: none; width: 1.6rem; min-height: 7rem; border-radius: 4px; overflow: hidden;
-    background: repeating-linear-gradient(to top, var(--rule) 0 1px, transparent 1px 0.5rem), var(--water-tint);
-  }
-  .mini-fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#4a92b3, #1f5673); }
-  .mini-fill::before {
-    content: ''; position: absolute; top: -4px; left: 0; width: 200%; height: 6px;
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='6' viewBox='0 0 26 6'%3E%3Cpath d='M0 3Q6.5 0 13 3T26 3V6H0Z' fill='%234a92b3'/%3E%3C/svg%3E") repeat-x;
-    animation: mini-drift 3s linear infinite;
-  }
-  @keyframes mini-drift { to { transform: translateX(-26px); } }
-  .tick { position: absolute; left: 0; right: 0; height: 3px; background: var(--tc); box-shadow: 0 0 0 1px rgb(16 36 58 / 0.35); }
-  .card-body { display: grid; gap: 0.15rem; align-content: start; min-width: 0; }
-  .pill { justify-self: start; font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.3rem 0.5rem; border-radius: 99px; background: var(--cat); color: var(--ink); margin-bottom: 0.3rem; }
-  .card-title { font: 700 1.3rem/1.05 var(--display); text-transform: uppercase; }
-  .card-place { color: var(--muted); font-size: 0.9rem; }
-  .card-stage { font: 800 1.9rem/1.1 var(--display); margin-top: 0.3rem; display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
-  .trend { font: 600 0.8rem var(--body); color: var(--muted); }
-  .trend.rising { color: #b00020; }
-  .card-meta { font-size: 0.82rem; color: var(--muted); }
 
   .map { height: clamp(22rem, 62vh, 34rem); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: #f2f3f0; box-shadow: 0 10px 30px rgb(16 36 58 / 0.08); }
   .map :global(.gpop .maplibregl-popup-content) { font: 400 0.9rem/1.35 var(--body); color: var(--ink); padding: 0.8rem 0.95rem; border-radius: 10px; box-shadow: 0 10px 28px rgb(16 36 58 / 0.22); display: grid; gap: 0.25rem; }

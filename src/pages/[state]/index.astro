@@ -1,0 +1,15 @@
+---
+import Base from '../../layouts/Base.astro';
+import AreaPage from '../../components/AreaPage.astro';
+import { getStatePage } from '../../lib/queries.ts';
+const data = await getStatePage(Astro.params.state!);
+if (!data) return new Response('Not found', { status: 404 });
+const { state, gauges } = data;
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const path = `/${state.slug}/`;
+const jsonLd = [{ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: state.name, item: path }] }];
+---
+<Base title={`${state.name} River Levels Today – Flood Stages & Forecasts`} description={`Live river levels for ${gauges.length} gauges in ${state.name}: which rivers are at action stage or flooding now, by river.`} canonicalPath={path} jsonLd={jsonLd}>
+  <ol class="crumbs" slot="crumbs"><li><a href={path}>{state.name}</a></li></ol>
+  <AreaPage heading={`${state.name} river levels`} lede={`Live readings from ${gauges.length} river gauges in ${state.name}, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river" />
+</Base>

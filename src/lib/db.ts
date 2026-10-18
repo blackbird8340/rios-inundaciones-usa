@@ -14,6 +14,8 @@ export function db(): mysql.Pool {
     dateStrings: false,
     decimalNumbers: true,
     multipleStatements: false,
+    // Bases gestionadas (TiDB Cloud, etc.) exigen TLS: DB_SSL=true.
+    ...(process.env.DB_SSL === 'true' ? { ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: true } } : {}),
   });
   return pool;
 }

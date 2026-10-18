@@ -1,3 +1,4 @@
+import { cleanName } from './slug.ts';
 import { db } from './db.ts';
 
 export type GaugeRow = {
@@ -18,7 +19,7 @@ export async function getGaugePage(slug: string) {
     [slug],
   );
   if (!gauge) return null;
-  const g = gauge as GaugeRow;
+  const g = { ...gauge, name: cleanName(gauge.name), place_name: cleanName(gauge.place_name) } as GaugeRow;
   const weekAgo = new Date(Date.now() - 7 * 86400_000);
 
   const [[impacts], [crests], [observations], [forecast], [alerts], [neighbors], [lastObs]] = await Promise.all([
@@ -55,8 +56,8 @@ export async function getGaugePage(slug: string) {
     forecast: forecast as { t: Date; v: number; issued_at: Date }[],
     alerts: alerts as any[],
     alertsCheckedAt: (alertsRun?.t as Date | null) ?? null,
-    upstream: (neighbors as any[]).find((n) => n.lid === g.upstream_lid) ?? null,
-    downstream: (neighbors as any[]).find((n) => n.lid === g.downstream_lid) ?? null,
+    upstream: (neighbors as any[]).map((n) => ({ ...n, name: cleanName(n.name) })).find((n) => n.lid === g.upstream_lid) ?? null,
+    downstream: (neighbors as any[]).map((n) => ({ ...n, name: cleanName(n.name) })).find((n) => n.lid === g.downstream_lid) ?? null,
     lastObservation: (lastObs as any[])[0] ?? null,
   };
 }
@@ -69,20 +70,42 @@ export async function listGauges() {
 }
 
 export type HomeGauge = {
-  slug: string; name: string; place_name: string | null; state_code: string; river_name: string | null; county_name: string | null;
+  slug: string; name: string; place_name: string | null; state_code: string; river_name: string | null; river_slug: string | null; county_name: string | null;
   lat: number; lon: number; stage_ft: number | null; status: string; trend: string | null; observed_at: Date | null;
   action_ft: number | null; minor_ft: number | null; moderate_ft: number | null; major_ft: number | null;
 };
 
+const num = (v: unknown) => (v == null ? null : Number(v));
+async function listHomeGauges(where = '1=1', params: (string | number)[] = []): Promise<HomeGauge[]> {
+  const [rows] = await db().execute<any[]>(
+    `SELECT g.slug, g.name, g.place_name, g.state_code, r.name river_name, r.slug river_slug, g.county_name, g.lat, g.lon,
+            g.stage_ft, IF(g.stage_ft IS NULL, 'no_data', g.status) status, g.trend, g.observed_at,
+            g.action_ft, g.minor_ft, g.moderate_ft, g.major_ft
+     FROM gauges g LEFT JOIN rivers r ON r.id = g.river_id WHERE ${where} ORDER BY g.state_code, g.name`,
+    params,
+  );
+  return rows.map((g) => ({
+    ...g, name: cleanName(g.name), place_name: cleanName(g.place_name), lat: Number(g.lat), lon: Number(g.lon), stage_ft: num(g.stage_ft),
+    action_ft: num(g.action_ft), minor_ft: num(g.minor_ft), moderate_ft: num(g.moderate_ft), major_ft: num(g.major_ft),
+  }));
+}
+
+export async function getStatePage(slug: string) {
+  const [[state]] = await db().execute<any[]>('SELECT code, name, slug FROM states WHERE slug = ?', [slug]);
+  if (!state) return null;
+  return { state: state as { code: string; name: string; slug: string }, gauges: await listHomeGauges('g.state_code = ?', [state.code]) };
+}
+
+export async function getRiverPage(slug: string) {
+  const [[river]] = await db().execute<any[]>('SELECT id, name, slug FROM rivers WHERE slug = ?', [slug]);
+  if (!river) return null;
+  return { river: river as { id: number; name: string; slug: string }, gauges: await listHomeGauges('g.river_id = ?', [river.id]) };
+}
+
 // Todo lo que necesita la home en una sola lectura de gauges (947 filas hoy).
 export async function getHomeData() {
-  const [[gauges], [records], [states]] = await Promise.all([
-    db().execute<any[]>(
-      `SELECT g.slug, g.name, g.place_name, g.state_code, r.name river_name, g.county_name, g.lat, g.lon,
-              g.stage_ft, IF(g.stage_ft IS NULL, 'no_data', g.status) status, g.trend, g.observed_at,
-              g.action_ft, g.minor_ft, g.moderate_ft, g.major_ft
-       FROM gauges g LEFT JOIN rivers r ON r.id = g.river_id ORDER BY g.state_code, g.name`,
-    ),
+  const [gauges, [records], [states]] = await Promise.all([
+    listHomeGauges(),
     // Crestas récord que más superaron el nivel de inundación (ft por encima de minor).
     db().execute<any[]>(
       `SELECT g.slug, g.name, g.state_code, c.stage_ft, c.occurred_at, g.minor_ft, c.stage_ft - g.minor_ft over_ft
@@ -93,14 +116,9 @@ export async function getHomeData() {
     ),
     db().execute<any[]>('SELECT code, name, slug FROM states ORDER BY name'),
   ]);
-  const num = (v: unknown) => (v == null ? null : Number(v));
-  const list: HomeGauge[] = (gauges as any[]).map((g) => ({
-    ...g, lat: Number(g.lat), lon: Number(g.lon), stage_ft: num(g.stage_ft),
-    action_ft: num(g.action_ft), minor_ft: num(g.minor_ft), moderate_ft: num(g.moderate_ft), major_ft: num(g.major_ft),
-  }));
   return {
-    gauges: list,
-    records: (records as any[]).map((r) => ({ ...r, stage_ft: Number(r.stage_ft), minor_ft: Number(r.minor_ft), over_ft: Number(r.over_ft) })) as {
+    gauges,
+    records: (records as any[]).map((r) => ({ ...r, name: cleanName(r.name), stage_ft: Number(r.stage_ft), minor_ft: Number(r.minor_ft), over_ft: Number(r.over_ft) })) as {
       slug: string; name: string; state_code: string; stage_ft: number; occurred_at: Date; minor_ft: number; over_ft: number;
     }[],
     states: states as { code: string; name: string; slug: string }[],

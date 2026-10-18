@@ -1,6 +1,7 @@
 import { db } from './db.ts';
 import { STATUS_META, statusFor, type Categories, type FloodStatus } from './flood.ts';
 import { fmtTime } from './format.ts';
+import { cleanName } from './slug.ts';
 
 export type RisingRow = {
   slug: string; name: string; state_code: string; status: FloodStatus; stage_ft: number;
@@ -9,7 +10,7 @@ export type RisingRow = {
 
 // Mayor subida en 24 h: último dato (de las últimas 3 h) contra la lectura más cercana a 24 h antes,
 // tomada entre 22 y 26 h antes (si no hay lectura en esa ventana, el medidor queda afuera).
-// Se excluyen los medidores de marea (nombre con "MLLW"), donde la subida diaria es la marea.
+// Solo medidores de río (gauge_type, ver scripts/ingest/classify.ts): embalses y marea quedan afuera.
 export async function getRisingFastest(limit = 10): Promise<RisingRow[]> {
   const since = new Date(Date.now() - 3 * 3600_000);
   const [rows] = await db().execute<any[]>(
@@ -21,12 +22,12 @@ export async function getRisingFastest(limit = 10): Promise<RisingRow[]> {
        WHERE o2.gauge_id = g.id
          AND o2.observed_at BETWEEN g.observed_at - INTERVAL 26 HOUR AND g.observed_at - INTERVAL 22 HOUR
        ORDER BY ABS(TIMESTAMPDIFF(SECOND, o2.observed_at, g.observed_at - INTERVAL 24 HOUR)) LIMIT 1)
-     WHERE g.stage_ft IS NOT NULL AND g.observed_at >= ? AND g.name NOT LIKE '%MLLW%'
+     WHERE g.stage_ft IS NOT NULL AND g.observed_at >= ? AND g.gauge_type = 'river'
        AND g.stage_ft - o.stage_ft > 0.05
      ORDER BY rise_ft DESC LIMIT ${Math.max(1, Math.min(100, Math.floor(limit)))}`,
     [since],
   );
-  return rows as RisingRow[];
+  return (rows as RisingRow[]).map((r) => ({ ...r, name: cleanName(r.name) }));
 }
 
 // Datos mínimos para el deslizador de impactos (home destacada).
@@ -44,7 +45,7 @@ export async function getImpactSliderData(slug: string) {
     ),
   ]);
   return {
-    gauge: g as { slug: string; name: string; state_code: string; stage_ft: number | null } & Categories,
+    gauge: { ...g, name: cleanName(g.name) } as { slug: string; name: string; state_code: string; stage_ft: number | null } & Categories,
     impacts: impacts as { stage_ft: number; statement: string }[],
     record: (crests as { occurred_at: Date; stage_ft: number }[])[0] ?? null,
   };
