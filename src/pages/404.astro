@@ -1,0 +1,28 @@
+---
+import Base from '../layouts/Base.astro';
+Astro.response.status = 404;
+---
+<Base title="Page not found" description="This page doesn't exist." canonicalPath="/404/" noindex>
+  <section class="nf">
+    <p class="code" aria-hidden="true">404</p>
+    <h1>This page is under water</h1>
+    <p class="muted">We couldn't find that page. The gauge may have moved or the link is mistyped.</p>
+    <ul class="go">
+      <li><a href="/">Search river gauges</a></li>
+      <li><a href="/pennsylvania/">Pennsylvania</a></li>
+      <li><a href="/north-carolina/">North Carolina</a></li>
+      <li><a href="/rising/">Rising fastest</a></li>
+    </ul>
+    <div class="water" aria-hidden="true"></div>
+  </section>
+</Base>
+<style>
+  .nf { position: relative; overflow: hidden; margin: 1rem calc(-1 * var(--gutter)) 0; padding: 3rem var(--gutter) 8rem; border-radius: 0 0 10px 10px; background: linear-gradient(#f7fafb, var(--paper)); isolation: isolate; }
+  .code { font: 800 clamp(5rem, 20vw, 9rem)/0.9 var(--display); color: var(--water); }
+  h1 { font: 800 clamp(2rem, 7vw, 3.5rem)/1 var(--display); text-transform: uppercase; margin: 0.5rem 0 0.75rem; }
+  .go { display: flex; flex-wrap: wrap; gap: 0.5rem; list-style: none; padding: 0; margin: 1.25rem 0 0; position: relative; z-index: 2; }
+  .go a { display: inline-block; padding: 0.6rem 1rem; background: var(--ink); color: #fff; border-radius: 6px; text-decoration: none; font-weight: 600; }
+  .water { position: absolute; left: 0; right: 0; bottom: 0; height: 5.5rem; z-index: -1; background: linear-gradient(#4a92b3, #1f5673); }
+  .water::before { content: ''; position: absolute; top: -12px; left: 0; right: 0; height: 13px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='13' viewBox='0 0 200 13'%3E%3Cpath d='M0 7Q50 0 100 7T200 7V13H0Z' fill='%234a92b3'/%3E%3C/svg%3E") repeat-x; animation: nf-drift 8s linear infinite; }
+  @keyframes nf-drift { to { background-position-x: 200px; } }
+</style>

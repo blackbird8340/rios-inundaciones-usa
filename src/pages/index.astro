@@ -48,10 +48,39 @@ const segments = ([
   ['action', counts.action], ['normal', counts.normal], ['no_data', counts.no_data],
 ] as [FloodStatus, number][]);
 const stateNames = stateCards.map((s) => s.name).join(' and ');
-const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: process.env.SITE_NAME || 'River Levels', url: '/' }];
+const riverCounts = new Map<string, { name: string; slug: string; n: number; alert: number }>();
+for (const g of gauges) {
+  if (!g.river_slug || !g.river_name) continue;
+  const r = riverCounts.get(g.river_slug) ?? { name: g.river_name, slug: g.river_slug, n: 0, alert: 0 };
+  r.n++; if (rank[st(g)] >= 2) r.alert++;
+  riverCounts.set(g.river_slug, r);
+}
+const topRivers = [...riverCounts.values()].filter((r) => r.n >= 2).sort((a, b) => b.alert - a.alert || b.n - a.n || a.name.localeCompare(b.name)).slice(0, 36);
+const siteName = process.env.SITE_NAME || 'Current Floods';
+const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
+const faqs: [string, string][] = [
+  ['Is any river flooding right now?', flooding > 0
+    ? `Yes. ${flooding} of ${gauges.length} gauges we track are at or above NWS flood stage, and ${counts.action} more are at action stage.`
+    : counts.action > 0 ? `No gauge we track is at flood stage. ${counts.action} ${counts.action === 1 ? 'is' : 'are'} at action stage, meaning the river is nearing flood stage.` : 'No. Every gauge with a recent reading is below action stage.'],
+  ['Where does the data come from?', 'Water levels come from U.S. Geological Survey (USGS) gauges and the NOAA National Weather Service (NWS) Water Prediction Service. Flood stages, impact statements, record crests and forecasts are published by the NWS.'],
+  ['How often is it updated?', 'We check for new readings every 30 minutes. Most gauges report every 15 to 60 minutes. USGS real-time data is provisional.'],
+  ['What is flood stage?', 'Flood stage is the level at which the river begins to cause minor flooding at that gauge. Each gauge has its own thresholds for action, minor, moderate and major flooding, set by the NWS.'],
+  ['Is this an official flood warning service?', 'No. For warnings, follow the National Weather Service (weather.gov) and local emergency officials. If you are in danger, call 911.'],
+];
+const jsonLd = [
+  { '@context': 'https://schema.org', '@type': 'WebSite', name: siteName, url: origin + '/' },
+  { '@context': 'https://schema.org', '@type': 'Organization', name: siteName, url: origin + '/', logo: origin + '/apple-touch-icon.png' },
+  { '@context': 'https://schema.org', '@type': 'Dataset', name: `${siteName}: river levels and flood stages for ${stateNames}`,
+    description: `Current river stage, NWS flood category and forecasts for ${gauges.length} river gauges in ${stateNames}, refreshed every 30 minutes.`,
+    url: origin + '/', isAccessibleForFree: true, spatialCoverage: stateNames,
+    creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey', url: 'https://www.usgs.gov/' }, { '@type': 'Organization', name: 'NOAA National Weather Service', url: 'https://www.weather.gov/' }],
+    distribution: [{ '@type': 'DataDownload', encodingFormat: 'application/json', contentUrl: origin + '/gauges.json' }],
+    ...(latest ? { dateModified: latest.toISOString() } : {}) },
+  { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) },
+];
 ---
 <Base
-  title="Is your river flooding? Live river levels and flood stages"
+  title={`${siteName}: river levels & flood stages today`}
   description={`Live river levels for ${gauges.length} gauges in ${stateNames}: which rivers are flooding now, flood stages, record crests and NWS forecasts.`}
   canonicalPath="/"
   jsonLd={jsonLd}
@@ -59,10 +88,10 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
   <section class="hero" style={`--lift: ${waterLevel}rem; --worst: var(--cat-${worst})`}>
     <div class="hero-inner">
       <h1>Is your river flooding?</h1>
-      <p class="lede">Live levels from {gauges.length.toLocaleString('en-US')} river gauges in {stateNames}. Search a town, river or gauge.</p>
+      <p class="lede">Live levels from {gauges.length.toLocaleString('en-US')} river gauges in {stateNames}. Search a town, ZIP, river or gauge.</p>
       <form class="search" role="search" action="#" id="search-form">
-        <label for="q" class="sr">Search by town, river, county or gauge</label>
-        <input id="q" type="search" autocomplete="off" placeholder="Town, river, county or gauge…" aria-controls="results" aria-describedby="search-hint" />
+        <label for="q" class="sr">Search by town, ZIP code, river, county or gauge</label>
+        <input id="q" type="search" autocomplete="off" placeholder="Town, ZIP, river or gauge…" aria-controls="results" aria-describedby="search-hint" />
         <button type="button" id="locate" class="locate">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 3h-2.07A7 7 0 0 0 13 5.07V3h-2v2.07A7 7 0 0 0 5.07 11H3v2h2.07A7 7 0 0 0 11 18.93V21h2v-2.07A7 7 0 0 0 18.93 13H21v-2Zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10Z"/></svg>
           Use my location
@@ -108,13 +137,22 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
 
   <section class="block" aria-labelledby="map-h">
     <h2 id="map-h">Map of gauges</h2>
-    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category. Flooding gauges pulse. Tap a dot for details.</p>
+    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category; numbers are clusters of nearby gauges. Use the checkboxes to filter by status or add NWS flood alert areas and radar.</p>
     <div id="map" class="map" role="region" aria-label="Map of river gauges"><p class="map-loading">Loading map…</p></div>
-    <ul class="legend">
-      {(['normal', 'action', 'minor', 'moderate', 'major', 'no_data'] as FloodStatus[]).map((s) => (
-        <li><span class:list={['dot', { pulse: ['minor', 'moderate', 'major'].includes(s) }]} style={`background: var(--cat-${s}); --g: var(--cat-${s})`}></span>{STATUS_META[s].label}</li>
-      ))}
-    </ul>
+    <div class="map-controls">
+      <fieldset class="legend">
+        <legend class="sr">Show gauges by status</legend>
+        {(['normal', 'action', 'minor', 'moderate', 'major', 'no_data'] as FloodStatus[]).map((s) => (
+          <label><input type="checkbox" data-status={s} checked /><span class:list={['dot', { pulse: ['minor', 'moderate', 'major'].includes(s) }]} style={`background: var(--cat-${s}); --g: var(--cat-${s})`}></span>{STATUS_META[s].label}</label>
+        ))}
+      </fieldset>
+      <fieldset class="layers">
+        <legend class="sr">Map layers</legend>
+        <label><input type="checkbox" data-layer="alerts-fill,alerts-line" checked />NWS flood alerts</label>
+        <label><input type="checkbox" data-layer="radar" />Radar</label>
+      </fieldset>
+      <p id="alerts-note" class="small muted" aria-live="polite"></p>
+    </div>
   </section>
 
   <section class="block" aria-labelledby="states-h">
@@ -131,6 +169,18 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
       ))}
     </ul>
   </section>
+
+  {topRivers.length > 0 && (
+    <section class="block" aria-labelledby="rivers-h">
+      <h2 id="rivers-h">Browse rivers</h2>
+      <ul class="rivers">
+        {topRivers.map((r) => (
+          <li><a href={`/river/${r.slug}/`}>{r.name}</a> <span class="muted small">{r.n} gauges{r.alert ? ` · ${r.alert} on alert` : ''}</span></li>
+        ))}
+      </ul>
+      <p class="small muted">More rivers on the <a href="/pennsylvania/">Pennsylvania</a> and <a href="/north-carolina/">North Carolina</a> pages.</p>
+    </section>
+  )}
 
   {records.length > 0 && (
     <section class="block" aria-labelledby="records-h">
@@ -164,67 +214,102 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
       <div style="--cat: var(--cat-moderate)"><dt>Moderate flooding</dt><dd>Some structures and roads near the river flood. Some evacuations possible.</dd></div>
       <div style="--cat: var(--cat-major)"><dt>Major flooding</dt><dd>Extensive flooding of structures and roads. Significant evacuations possible.</dd></div>
     </dl>
-    <p class="muted small">Each gauge page shows what floods at each level for that spot.</p>
+    <p class="muted small">Each gauge page shows what floods at each level for that spot. More in our <a href="/methodology/">methodology</a>.</p>
+  </section>
+
+  <section class="block faq" aria-labelledby="faq-h">
+    <h2 id="faq-h">Frequently asked questions</h2>
+    {faqs.map(([q, a]) => <details><summary>{q}</summary><p>{a}</p></details>)}
   </section>
 </Base>
 
 <script>
+  import MiniSearch from 'minisearch';
   type Row = [string, string, string | null, string, string | null, string | null, number, number, string, number | null];
+  type Doc = { id: string; kind: 'gauge' | 'place' | 'zip' | 'river'; label: string; sub: string; text: string; lat: number; lon: number; href?: string; status?: string; stage?: number | null };
   const COLORS: Record<string, string> = { normal: '#00c853', action: '#e6c800', minor: '#ff9900', moderate: '#ff0000', major: '#cc33ff', no_data: '#9e9e9e' };
   const LABELS: Record<string, string> = { normal: 'Normal', action: 'Action stage', minor: 'Minor flooding', moderate: 'Moderate flooding', major: 'Major flooding', no_data: 'No recent data' };
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} ft`);
 
   let index: Promise<Row[]> | null = null;
   const load = (): Promise<Row[]> => (index ??= fetch('/gauges.json').then((r) => r.json() as Promise<Row[]>));
 
+  // Índice de búsqueda: medidores + ríos + pueblos (Census Places) + ZIP (Census ZCTA). Se arma al primer foco.
+  let search: Promise<{ ms: MiniSearch<Doc>; zips: Map<string, [number, number]>; rows: Row[] }> | null = null;
+  const buildSearch = () => (search ??= (async () => {
+    const [rows, places, zips] = await Promise.all([
+      load(),
+      fetch('/search/places.json').then((r) => r.json() as Promise<[string, string, number, number][]>),
+      fetch('/search/zips.json').then((r) => r.json() as Promise<[string, number, number][]>),
+    ]);
+    const docs: Doc[] = rows.map((r) => ({ id: 'g:' + r[0], kind: 'gauge', label: r[1], sub: `${r[3]} · ${LABELS[r[8]]} · ${fmt(r[9])}`, text: [r[1], r[2], r[4], r[5] ? r[5] + ' County' : ''].join(' '), lat: r[6], lon: r[7], href: `/gauge/${r[0]}/`, status: r[8], stage: r[9] }));
+    const rivers = new Map<string, Row>();
+    for (const r of rows) if (r[4] && !rivers.has(r[4])) rivers.set(r[4], r);
+    for (const [name, r] of rivers) docs.push({ id: 'r:' + name, kind: 'river', label: name, sub: 'River', text: name, lat: r[6], lon: r[7] });
+    places.forEach(([n, st, lat, lon], i) => docs.push({ id: `p:${i}`, kind: 'place', label: `${n}, ${st}`, sub: 'Town', text: n, lat, lon }));
+    const ms = new MiniSearch<Doc>({ fields: ['label', 'text'], storeFields: ['kind', 'label', 'sub', 'lat', 'lon', 'href', 'status', 'stage'], searchOptions: { prefix: true, fuzzy: 0.2, boost: { label: 2 } } });
+    ms.addAll(docs);
+    return { ms, zips: new Map(zips.map(([z, la, lo]) => [z, [la, lo]])), rows };
+  })());
+
   const input = document.getElementById('q') as HTMLInputElement;
   const results = document.getElementById('results') as HTMLUListElement;
   const hint = document.getElementById('search-hint') as HTMLParagraphElement;
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-  const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} ft`);
+  const rad = Math.PI / 180;
+  const miles = (la: number, lo: number, la2: number, lo2: number) => {
+    const a = Math.sin(((la2 - la) * rad) / 2) ** 2 + Math.cos(la * rad) * Math.cos(la2 * rad) * Math.sin(((lo2 - lo) * rad) / 2) ** 2;
+    return 3958.8 * 2 * Math.asin(Math.sqrt(a));
+  };
+  const nearest = (rows: Row[], la: number, lo: number, n = 6) => rows.map((r) => ({ r, d: miles(la, lo, r[6], r[7]) })).sort((a, b) => a.d - b.d).slice(0, n);
+  const gaugeItem = (r: Row, extra = '') => `<li><a href="/gauge/${r[0]}/"><span class="r-dot" style="background:${COLORS[r[8]]}"></span><span><strong>${esc(r[1])}</strong>, ${r[3]}<br><small>${LABELS[r[8]]} · ${fmt(r[9])}${extra}</small></span></a></li>`;
+  const show = (html: string, msg: string) => { hint.textContent = msg; results.innerHTML = html; results.hidden = !html; };
 
-  function render(rows: { r: Row; extra?: string }[], msg: string) {
-    hint.textContent = msg;
-    results.hidden = rows.length === 0;
-    results.innerHTML = rows.map(({ r, extra }) => `
-      <li><a href="/gauge/${r[0]}/"><span class="r-dot" style="background:${COLORS[r[8]]}"></span>
-      <span><strong>${esc(r[1])}</strong>, ${r[3]}<br><small>${LABELS[r[8]]} · ${fmt(r[9])}${extra ? ' · ' + extra : ''}</small></span></a></li>`).join('');
-  }
-
-  const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9 ]/g, ' ');
-  input.addEventListener('focus', load, { once: true });
+  input.addEventListener('focus', () => { buildSearch(); }, { once: true });
   input.addEventListener('input', async () => {
-    const q = norm(input.value).trim();
-    if (q.length < 2) return render([], '');
-    const terms = q.split(/\s+/);
-    const rows = await load();
-    const hits = rows.filter((r) => {
-      const hay = norm([r[1], r[2], r[4], r[5] ? r[5] + ' county' : '', r[3]].join(' '));
-      return terms.every((t) => hay.includes(t));
-    }).slice(0, 12);
-    render(hits.map((r) => ({ r })), hits.length ? `${hits.length === 12 ? 'Top 12' : hits.length} matches` : 'No gauges match. Try a river or county name.');
+    const q = input.value.trim();
+    if (q.length < 2) return show('', '');
+    const { ms, zips, rows } = await buildSearch();
+    if (/^\d{5}$/.test(q)) {
+      const z = zips.get(q);
+      if (!z) return show('', `ZIP ${q} is outside our coverage (Pennsylvania and North Carolina).`);
+      return show(nearest(rows, z[0], z[1]).map(({ r, d }) => gaugeItem(r, ` · ${d.toFixed(1)} mi`)).join(''), `Gauges nearest ZIP ${q}`);
+    }
+    if (/^\d{1,4}$/.test(q)) return show('', 'Type a 5-digit ZIP code.');
+    const hits = ms.search(q).slice(0, 14) as unknown as (Doc & { score: number })[];
+    const groups: Record<string, string[]> = { gauge: [], river: [], place: [] };
+    for (const h of hits) {
+      if (h.kind === 'gauge') groups.gauge.length < 8 && groups.gauge.push(`<li><a href="${h.href}"><span class="r-dot" style="background:${COLORS[h.status!]}"></span><span><strong>${esc(h.label)}</strong><br><small>${esc(h.sub)}</small></span></a></li>`);
+      else if (groups[h.kind].length < 4) groups[h.kind].push(`<li><button type="button" class="near" data-lat="${h.lat}" data-lon="${h.lon}" data-label="${esc(h.label)}"><span class="r-kind">${h.kind === 'river' ? 'River' : 'Town'}</span><span><strong>${esc(h.label)}</strong><br><small>Show nearest gauges</small></span></button></li>`);
+    }
+    const html = [['Towns', groups.place], ['Rivers', groups.river], ['Gauges', groups.gauge]].filter(([, l]) => l.length).map(([t, l]) => `<li class="r-group">${t}</li>${(l as string[]).join('')}`).join('');
+    show(html, html ? '' : 'No matches. Try a town, ZIP, river or county.');
+  });
+  results.addEventListener('click', async (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button.near');
+    if (!b) return;
+    const { rows } = await buildSearch();
+    const label = b.dataset.label!;
+    const isRiver = b.querySelector('.r-kind')!.textContent === 'River';
+    const list = isRiver ? rows.filter((r) => r[4] === label).map((r) => ({ r, d: 0 })) : nearest(rows, Number(b.dataset.lat), Number(b.dataset.lon));
+    show(list.slice(0, 12).map(({ r, d }) => gaugeItem(r, isRiver ? '' : ` · ${d.toFixed(1)} mi`)).join(''), isRiver ? `Gauges on the ${label}` : `Gauges nearest ${label}`);
   });
   document.getElementById('search-form')!.addEventListener('submit', (e) => {
     e.preventDefault();
-    (results.querySelector('a') as HTMLAnchorElement | null)?.click();
+    (results.querySelector('a, button') as HTMLElement | null)?.click();
   });
 
   document.getElementById('locate')!.addEventListener('click', () => {
-    if (!navigator.geolocation) return render([], 'Your browser does not share location.');
+    if (!navigator.geolocation) return show('', 'Your browser does not share location.');
     hint.textContent = 'Finding gauges near you…';
     navigator.geolocation.getCurrentPosition(async (pos) => {
-      const { latitude: la, longitude: lo } = pos.coords;
-      const rad = Math.PI / 180;
-      const miles = (r: Row) => {
-        const a = Math.sin(((r[6] - la) * rad) / 2) ** 2 + Math.cos(la * rad) * Math.cos(r[6] * rad) * Math.sin(((r[7] - lo) * rad) / 2) ** 2;
-        return 3958.8 * 2 * Math.asin(Math.sqrt(a));
-      };
-      const near = (await load()).map((r) => ({ r, d: miles(r) })).sort((a, b) => a.d - b.d).slice(0, 8);
-      if (near[0].d > 150) return render([], 'We do not cover your area yet. Coverage today: ' + document.querySelector('.lede')!.textContent);
-      render(near.map(({ r, d }) => ({ r, extra: `${d.toFixed(1)} mi away` })), 'Nearest gauges to you');
-    }, () => render([], 'Location not available. Search by town or river instead.'), { timeout: 10000 });
+      const near = nearest(await load(), pos.coords.latitude, pos.coords.longitude, 8);
+      if (near[0].d > 150) return show('', 'We do not cover your area yet. Coverage today: Pennsylvania and North Carolina.');
+      show(near.map(({ r, d }) => gaugeItem(r, ` · ${d.toFixed(1)} mi away`)).join(''), 'Nearest gauges to you');
+    }, () => show('', 'Location not available. Search by town, ZIP or river instead.'), { timeout: 10000 });
   });
 
-  // Mapa: MapLibre + OpenFreeMap (Positron). Se carga recién cuando se acerca a la pantalla.
+  // Mapa: MapLibre + OpenFreeMap (Positron), clusters, filtros por estado, capas de alertas NWS y radar IEM.
   const mapEl = document.getElementById('map')!;
   new IntersectionObserver(async (entries, obs) => {
     if (!entries.some((e) => e.isIntersecting)) return;
@@ -233,32 +318,36 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
     const [maplibregl, rows] = (await Promise.all([import(/* @vite-ignore */ new URL(lib, location.href).href), load(), import('maplibre-gl/dist/maplibre-gl.css')])) as [typeof import('maplibre-gl'), Row[], unknown];
     mapEl.innerHTML = '';
     const order: Record<string, number> = { no_data: 0, normal: 1, action: 2, minor: 3, moderate: 4, major: 5 };
-    const data = {
+    const toFc = (list: Row[]) => ({
       type: 'FeatureCollection' as const,
-      features: rows.map((r) => ({
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [r[7], r[6]] },
-        properties: { slug: r[0], name: r[1], status: r[8], stage: r[9], rank: order[r[8]] },
-      })),
-    };
+      features: list.map((r) => ({ type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [r[7], r[6]] }, properties: { slug: r[0], name: r[1], status: r[8], stage: r[9], rank: order[r[8]] } })),
+    });
     const lons = rows.map((r) => r[7]), lats = rows.map((r) => r[6]);
     const map = new maplibregl.Map({
-      container: mapEl,
-      style: 'https://tiles.openfreemap.org/styles/positron',
-      bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
-      fitBoundsOptions: { padding: 24 },
-      cooperativeGestures: true,
-      attributionControl: { compact: true },
+      container: mapEl, style: 'https://tiles.openfreemap.org/styles/positron',
+      bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], fitBoundsOptions: { padding: 24 },
+      cooperativeGestures: true, attributionControl: { compact: true },
     });
+    (mapEl as any).__map = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     const color: any = ['match', ['get', 'status'], ...Object.entries(COLORS).flat(), '#9e9e9e'];
-    (mapEl as any).__map = map;
+    const active = new Set(Object.keys(order));
+    const filtered = () => toFc(rows.filter((r) => active.has(r[8])));
     map.on('load', () => {
-      map.addSource('gauges', { type: 'geojson', data });
-      // Halo pulsante solo para inundación.
-      map.addLayer({ id: 'halo', type: 'circle', source: 'gauges', filter: ['>=', ['get', 'rank'], 3],
+      map.addSource('radar', { type: 'raster', tiles: ['https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png'], tileSize: 256, attribution: 'Radar: <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>' });
+      map.addLayer({ id: 'radar', type: 'raster', source: 'radar', paint: { 'raster-opacity': 0.6 }, layout: { visibility: 'none' } });
+      map.addSource('alerts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, attribution: 'Alerts: <a href="https://www.weather.gov/">NWS</a>' });
+      map.addLayer({ id: 'alerts-fill', type: 'fill', source: 'alerts', paint: { 'fill-color': ['case', ['in', 'Warning', ['get', 'event']], '#00ff00', '#2e8b57'], 'fill-opacity': 0.18 } });
+      map.addLayer({ id: 'alerts-line', type: 'line', source: 'alerts', paint: { 'line-color': '#1b5e20', 'line-width': 1.5 } });
+      map.addSource('gauges', { type: 'geojson', data: filtered(), cluster: true, clusterRadius: 38, clusterMaxZoom: 8, clusterProperties: { worst: ['max', ['get', 'rank']] } });
+      const worstColor: any = ['match', ['get', 'worst'], 5, COLORS.major, 4, COLORS.moderate, 3, COLORS.minor, 2, COLORS.action, 1, COLORS.normal, COLORS.no_data];
+      map.addLayer({ id: 'clusters', type: 'circle', source: 'gauges', filter: ['has', 'point_count'],
+        paint: { 'circle-color': worstColor, 'circle-opacity': 0.85, 'circle-radius': ['step', ['get', 'point_count'], 13, 20, 17, 60, 22], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      map.addLayer({ id: 'cluster-count', type: 'symbol', source: 'gauges', filter: ['has', 'point_count'],
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Noto Sans Bold'] }, paint: { 'text-color': '#10243a' } });
+      map.addLayer({ id: 'halo', type: 'circle', source: 'gauges', filter: ['all', ['!', ['has', 'point_count']], ['>=', ['get', 'rank'], 3]],
         paint: { 'circle-color': color, 'circle-radius': 14, 'circle-opacity': 0.25, 'circle-blur': 0.6 } });
-      map.addLayer({ id: 'dots', type: 'circle', source: 'gauges', layout: { 'circle-sort-key': ['get', 'rank'] },
+      map.addLayer({ id: 'dots', type: 'circle', source: 'gauges', filter: ['!', ['has', 'point_count']], layout: { 'circle-sort-key': ['get', 'rank'] },
         paint: {
           'circle-color': color,
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, ['match', ['get', 'rank'], 0, 2.5, 1, 3.5, 6], 10, ['match', ['get', 'rank'], 0, 5, 1, 6, 10]],
@@ -276,9 +365,32 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
         };
         requestAnimationFrame(pulse);
       }
+      // Alertas NWS activas de crecida con polígono (las que solo tienen zonas no se dibujan).
+      fetch('https://api.weather.gov/alerts/active?area=PA,NC', { headers: { Accept: 'application/geo+json' } })
+        .then((r) => r.json())
+        .then((fc) => {
+          const feats = (fc.features ?? []).filter((f: any) => f.geometry && /flood/i.test(f.properties?.event ?? ''))
+            .map((f: any) => ({ type: 'Feature', geometry: f.geometry, properties: { event: f.properties.event, headline: f.properties.headline ?? '' } }));
+          (map.getSource('alerts') as any).setData({ type: 'FeatureCollection', features: feats });
+          const note = document.getElementById('alerts-note');
+          if (note) note.textContent = feats.length ? `${feats.length} active NWS flood alert area${feats.length === 1 ? '' : 's'} drawn.` : 'No NWS flood alert polygons active right now.';
+        })
+        .catch(() => { const note = document.getElementById('alerts-note'); if (note) note.textContent = 'Could not load NWS alerts.'; });
     });
-    map.on('mouseenter', 'dots', () => (map.getCanvas().style.cursor = 'pointer'));
-    map.on('mouseleave', 'dots', () => (map.getCanvas().style.cursor = ''));
+    map.on('click', 'clusters', async (e: any) => {
+      const f = e.features[0];
+      const z = await (map.getSource('gauges') as any).getClusterExpansionZoom(f.properties.cluster_id);
+      map.easeTo({ center: f.geometry.coordinates, zoom: z });
+    });
+    for (const l of ['dots', 'clusters']) {
+      map.on('mouseenter', l, () => (map.getCanvas().style.cursor = 'pointer'));
+      map.on('mouseleave', l, () => (map.getCanvas().style.cursor = ''));
+    }
+    map.on('click', 'alerts-fill', (e: any) => {
+      if (map.queryRenderedFeatures(e.point, { layers: ['dots', 'clusters'] }).length) return;
+      const p = e.features[0].properties;
+      new maplibregl.Popup({ className: 'gpop', maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(`<strong class="gpop-name">${esc(p.event)}</strong><span>${esc(p.headline)}</span><a class="gpop-link" href="https://www.weather.gov/" target="_blank" rel="noopener">Official details at weather.gov →</a>`).addTo(map);
+    });
     map.on('click', 'dots', (e: any) => {
       const f = e.features![0];
       const p = f.properties as { slug: string; name: string; status: string; stage: number | null | string };
@@ -291,6 +403,13 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
           <a class="gpop-link" href="/gauge/${p.slug}/">View gauge →</a>`)
         .addTo(map);
     });
+    document.querySelectorAll<HTMLInputElement>('.legend input[data-status]').forEach((cb) => cb.addEventListener('change', () => {
+      cb.checked ? active.add(cb.dataset.status!) : active.delete(cb.dataset.status!);
+      (map.getSource('gauges') as any)?.setData(filtered());
+    }));
+    document.querySelectorAll<HTMLInputElement>('.layers input[data-layer]').forEach((cb) => cb.addEventListener('change', () => {
+      for (const id of cb.dataset.layer!.split(',')) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', cb.checked ? 'visible' : 'none');
+    }));
   }, { rootMargin: '300px' }).observe(mapEl);
 </script>
 
@@ -370,7 +489,16 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
   .map :global(.gpop-link) { font-weight: 600; color: var(--water-deep); }
   .map :global(.maplibregl-popup-close-button) { font-size: 1.2rem; padding: 0 0.4rem; color: var(--muted); }
   .map-loading { padding: 1rem; color: var(--muted); }
-  .legend { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0.75rem 0 0; padding: 0; font-size: 0.82rem; }
+  .map-controls { display: grid; gap: 0.4rem; margin-top: 0.75rem; }
+  fieldset { border: 0; margin: 0; padding: 0; }
+  .layers { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.82rem; }
+  .layers label, .legend label { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.65rem; background: var(--card); border: 1px solid var(--rule); border-radius: 99px; cursor: pointer; }
+  .layers input, .legend input { accent-color: var(--water-deep); margin: 0; }
+  .results :global(.r-group) { padding: 0.4rem 0.9rem; font: 700 0.72rem var(--body); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); background: var(--paper); }
+  .results :global(button.near) { all: unset; box-sizing: border-box; display: flex; gap: 0.7rem; width: 100%; padding: 0.65rem 0.9rem; cursor: pointer; }
+  .results :global(button.near:hover), .results :global(button.near:focus-visible) { background: var(--water-tint); }
+  .results :global(.r-kind) { flex: none; font: 700 0.65rem var(--body); text-transform: uppercase; padding: 0.2rem 0.4rem; border-radius: 4px; background: var(--water-tint); color: var(--water-deep); margin-top: 0.2rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0; padding: 0; font-size: 0.82rem; }
   .legend li { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.65rem; background: var(--card); border: 1px solid var(--rule); border-radius: 99px; }
   .legend .dot.pulse { box-shadow: 0 0 6px 2px var(--g); }
 
@@ -389,6 +517,11 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
   .records .rec-num { font: 800 1.4rem/1 var(--display); text-align: right; }
   .records .small { grid-column: 2 / -1; }
 
+  .rivers { list-style: none; margin: 0 0 0.5rem; padding: 0; columns: 15rem; column-gap: 1.5rem; }
+  .rivers li { break-inside: avoid; padding: 0.25rem 0; }
+  .faq details { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; margin-bottom: 0.5rem; }
+  .faq summary { cursor: pointer; padding: 0.8rem 1rem; font-weight: 600; }
+  .faq details p { padding: 0 1rem 0.9rem; color: var(--muted); max-width: 48rem; }
   .explain > p { max-width: 44rem; }
   .cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.6rem; margin: 1rem 0; }
   .cats div { padding: 0.8rem 1rem; background: var(--card); border-left: 6px solid var(--cat); border-radius: 6px; }

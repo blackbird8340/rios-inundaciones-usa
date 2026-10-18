@@ -1,0 +1,21 @@
+---
+interface Props { title: string; description: string; path: string; heading: string }
+import Base from '../layouts/Base.astro';
+const { title, description, path, heading } = Astro.props;
+---
+<Base title={title} description={description} canonicalPath={path}>
+  <ol class="crumbs" slot="crumbs"><li><a href={path}>{heading}</a></li></ol>
+  <article class="prose">
+    <h1>{heading}</h1>
+    <aside class="safety"><strong>Safety first.</strong> This site is not an official warning system. Follow National Weather Service warnings at <a href="https://www.weather.gov/">weather.gov</a> and your local emergency officials. If you are in danger, call 911. Turn around, don't drown: never drive or walk into flood water.</aside>
+    <slot />
+  </article>
+</Base>
+<style>
+  .prose { max-width: 46rem; padding-block: 2rem 1rem; }
+  h1 { font: 800 clamp(2.2rem, 7vw, 3.5rem)/1 var(--display); text-transform: uppercase; margin-bottom: 1rem; }
+  .prose :global(h2) { margin: 2rem 0 0.6rem; }
+  .prose :global(p), .prose :global(li) { margin-bottom: 0.7rem; }
+  .prose :global(ul) { padding-left: 1.2rem; }
+  .safety { padding: 1rem 1.2rem; background: #fff4e5; border-left: 6px solid var(--cat-minor); border-radius: 6px; margin-bottom: 1.5rem; }
+</style>

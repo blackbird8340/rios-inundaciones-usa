@@ -1,0 +1,15 @@
+---
+import Prose from '../components/Prose.astro';
+---
+<Prose title="Data sources" description="Where our river levels, flood stages, forecasts, alerts and maps come from." path="/sources/" heading="Data sources">
+  <ul>
+    <li><strong>River levels:</strong> <a href="https://water.noaa.gov/">NOAA National Water Prediction Service (NWPS)</a>, with <a href="https://waterdata.usgs.gov/">USGS Water Data</a> as a fallback. USGS real-time data is provisional and subject to revision.</li>
+    <li><strong>Flood categories, impact statements, record crests and forecasts:</strong> National Weather Service, via NWPS.</li>
+    <li><strong>Flood alerts:</strong> <a href="https://www.weather.gov/documentation/services-web-api">NWS API</a> (api.weather.gov).</li>
+    <li><strong>Gauge type (river, reservoir, estuary):</strong> USGS site type from the NWIS site service, plus our own rules (see <a href="/methodology/">methodology</a>).</li>
+    <li><strong>Towns and ZIP codes in search:</strong> U.S. Census Bureau 2024 Gazetteer files (places and ZIP Code Tabulation Areas).</li>
+    <li><strong>Base map:</strong> <a href="https://openfreemap.org/">OpenFreeMap</a> © <a href="https://openmaptiles.org/">OpenMapTiles</a>, data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.</li>
+    <li><strong>Radar:</strong> NEXRAD tiles from the <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>, Iowa State University.</li>
+  </ul>
+  <p>Data from USGS and NOAA is in the public domain. Machine-readable list of gauges: <a href="/gauges.json">/gauges.json</a>.</p>
+</Prose>

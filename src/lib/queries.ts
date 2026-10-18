@@ -1,4 +1,4 @@
-import { cleanName } from './slug.ts';
+import { cleanName, legacySlugTarget } from './slug.ts';
 import { db } from './db.ts';
 
 export type GaugeRow = {
@@ -123,4 +123,12 @@ export async function getHomeData() {
     }[],
     states: states as { code: string; name: string; slug: string }[],
   };
+}
+
+// Si el slug pedido es una URL vieja (con datum), devuelve el slug actual para redirigir.
+export async function gaugeRedirect(slug: string): Promise<string | null> {
+  const target = legacySlugTarget(slug);
+  if (!target) return null;
+  const [[row]] = await db().execute<any[]>('SELECT slug FROM gauges WHERE slug = ?', [target]);
+  return row?.slug ?? null;
 }

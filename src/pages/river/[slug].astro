@@ -3,7 +3,7 @@ import Base from '../../layouts/Base.astro';
 import AreaPage from '../../components/AreaPage.astro';
 import { getRiverPage } from '../../lib/queries.ts';
 const data = await getRiverPage(Astro.params.slug!);
-if (!data) return new Response('Not found', { status: 404 });
+if (!data) return new Response(null, { status: 404 });
 const { river, gauges } = data;
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 const path = `/river/${river.slug}/`;

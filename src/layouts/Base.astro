@@ -14,7 +14,7 @@ interface Props {
   ogImage?: string;
 }
 const { title, description, canonicalPath, jsonLd = [], noindex = false, ogImage } = Astro.props;
-const siteName = process.env.SITE_NAME || 'River Levels';
+const siteName = process.env.SITE_NAME || 'Current Floods';
 const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
 ---
 <!doctype html>
@@ -55,6 +55,10 @@ const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 
         For life-threatening flooding, call 911. Official forecasts: <a href="https://water.noaa.gov/">water.noaa.gov</a> ·
         Warnings: <a href="https://www.weather.gov/">weather.gov</a>.
       </p>
+      <nav class="foot-nav" aria-label="Site">
+        <a href="/">Home</a><a href="/pennsylvania/">Pennsylvania</a><a href="/north-carolina/">North Carolina</a><a href="/rising/">Rising fastest</a>
+        <a href="/about/">About</a><a href="/methodology/">Methodology</a><a href="/sources/">Sources</a>
+      </nav>
       <p>Data: USGS, NOAA/NWS. Real-time USGS data is provisional and subject to revision. {siteName} is not affiliated with USGS or NOAA.</p>
     </footer>
   </body>
