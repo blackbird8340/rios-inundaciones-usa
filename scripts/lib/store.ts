@@ -1,4 +1,4 @@
-import { db } from '../../src/lib/db.ts';
+import { db, withDeadlockRetry } from '../../src/lib/db.ts';
 import { statusFor, trendFor } from '../../src/lib/flood.ts';
 import { toCfs, val, type NwpsStageflow } from './nwps.ts';
 
@@ -89,27 +89,31 @@ export async function recomputeDerived(gaugeIds: number[]) {
   for (const c of crests) if (!crestBy.has(c.gauge_id)) crestBy.set(c.gauge_id, c);
 
   const now = new Date();
-  for (const g of gauges) {
+  const rows = gauges.map((g) => {
     let l = latestBy.get(g.id);
     // Un dato de más de un día no sirve para el semáforo.
     if (l && now.getTime() - l.observed_at.getTime() > 86400_000) l = undefined;
     const c = crestBy.get(g.id);
-    await db().execute(
-      `UPDATE gauges SET stage_ft = ?, flow_cfs = ?, observed_at = ?, status = ?, trend = ?,
-         forecast_crest_ft = ?, forecast_crest_at = ?, forecast_status = ?, levels_updated_at = ? WHERE id = ?`,
-      [
-        l?.stage_ft ?? null,
-        l?.flow_cfs ?? null,
-        l?.observed_at ?? null,
-        statusFor(l?.stage_ft, g),
-        trendFor(byGauge.get(g.id) ?? []),
-        c?.stage_ft ?? null,
-        c?.valid_at ?? null,
-        statusFor(c?.stage_ft, g),
-        now,
-        g.id,
-      ],
-    );
+    return {
+      id: g.id as number,
+      vals: [
+        l?.stage_ft ?? null, l?.flow_cfs ?? null, l?.observed_at ?? null, statusFor(l?.stage_ft, g),
+        trendFor(byGauge.get(g.id) ?? []), c?.stage_ft ?? null, c?.valid_at ?? null, statusFor(c?.stage_ft, g), now,
+      ] as unknown[],
+    };
+  });
+  // Lotes chicos de 50 (un UPDATE con CASE por lote, autocommit): transacciones cortas que TiDB no deja
+  // trabadas, y cada lote se reintenta solo ante errores de lock transitorios.
+  const cols = ['stage_ft', 'flow_cfs', 'observed_at', 'status', 'trend', 'forecast_crest_ft', 'forecast_crest_at', 'forecast_status', 'levels_updated_at'];
+  for (let k = 0; k < rows.length; k += 50) {
+    const batch = rows.slice(k, k + 50);
+    const params: unknown[] = [];
+    const sets = cols.map((col, ci) => {
+      for (const r of batch) params.push(r.id, r.vals[ci]);
+      return `${col} = CASE id ${batch.map(() => 'WHEN ? THEN ?').join(' ')} END`;
+    });
+    params.push(...batch.map((r) => r.id));
+    await withDeadlockRetry(() => db().query(`UPDATE gauges SET ${sets.join(', ')} WHERE id IN (${batch.map(() => '?').join(',')})`, params));
   }
 }
 
