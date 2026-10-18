@@ -67,3 +67,42 @@ export async function listGauges() {
   );
   return rows as { slug: string; name: string; state_code: string; stage_ft: number | null; status: string; observed_at: Date | null }[];
 }
+
+export type HomeGauge = {
+  slug: string; name: string; place_name: string | null; state_code: string; river_name: string | null; county_name: string | null;
+  lat: number; lon: number; stage_ft: number | null; status: string; trend: string | null; observed_at: Date | null;
+  action_ft: number | null; minor_ft: number | null; moderate_ft: number | null; major_ft: number | null;
+};
+
+// Todo lo que necesita la home en una sola lectura de gauges (947 filas hoy).
+export async function getHomeData() {
+  const [[gauges], [records], [states]] = await Promise.all([
+    db().execute<any[]>(
+      `SELECT g.slug, g.name, g.place_name, g.state_code, r.name river_name, g.county_name, g.lat, g.lon,
+              g.stage_ft, IF(g.stage_ft IS NULL, 'no_data', g.status) status, g.trend, g.observed_at,
+              g.action_ft, g.minor_ft, g.moderate_ft, g.major_ft
+       FROM gauges g LEFT JOIN rivers r ON r.id = g.river_id ORDER BY g.state_code, g.name`,
+    ),
+    // Crestas récord que más superaron el nivel de inundación (ft por encima de minor).
+    db().execute<any[]>(
+      `SELECT g.slug, g.name, g.state_code, c.stage_ft, c.occurred_at, g.minor_ft, c.stage_ft - g.minor_ft over_ft
+       FROM gauge_crests c JOIN gauges g ON g.id = c.gauge_id
+       WHERE c.kind = 'historic' AND g.minor_ft IS NOT NULL
+         AND c.stage_ft = (SELECT MAX(c2.stage_ft) FROM gauge_crests c2 WHERE c2.gauge_id = c.gauge_id AND c2.kind = 'historic')
+       ORDER BY over_ft DESC LIMIT 6`,
+    ),
+    db().execute<any[]>('SELECT code, name, slug FROM states ORDER BY name'),
+  ]);
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  const list: HomeGauge[] = (gauges as any[]).map((g) => ({
+    ...g, lat: Number(g.lat), lon: Number(g.lon), stage_ft: num(g.stage_ft),
+    action_ft: num(g.action_ft), minor_ft: num(g.minor_ft), moderate_ft: num(g.moderate_ft), major_ft: num(g.major_ft),
+  }));
+  return {
+    gauges: list,
+    records: (records as any[]).map((r) => ({ ...r, stage_ft: Number(r.stage_ft), minor_ft: Number(r.minor_ft), over_ft: Number(r.over_ft) })) as {
+      slug: string; name: string; state_code: string; stage_ft: number; occurred_at: Date; minor_ft: number; over_ft: number;
+    }[],
+    states: states as { code: string; name: string; slug: string }[],
+  };
+}
