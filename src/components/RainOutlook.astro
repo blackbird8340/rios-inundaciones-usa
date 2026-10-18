@@ -1,0 +1,27 @@
+---
+// Lluvia esperada 72 h (NWS Weather Prediction Center) en lenguaje simple.
+import type { Rain } from '../lib/queries.ts';
+import { fmtTime } from '../lib/format.ts';
+interface Props { rain: Rain | null; tz: string }
+const { rain, tz } = Astro.props;
+const q = rain?.qpf_in ?? 0;
+const range = !rain ? '' : q <= 0 ? `less than ${rain.next_in ?? 0.01} in` : rain.next_in ? `${q}–${rain.next_in} in` : `${q}+ in`;
+const word = q >= 3 ? 'Very heavy rain' : q >= 1.5 ? 'Heavy rain' : q >= 0.5 ? 'Moderate rain' : q >= 0.1 ? 'Light rain' : 'Little or no rain';
+const note = q >= 1.5 ? 'Enough to raise small streams and rivers quickly. Watch the forecast above.' : q >= 0.5 ? 'Can raise creeks and small rivers; larger rivers respond more slowly.' : 'Not likely to change river levels much by itself.';
+const pct = Math.min(100, (Math.max(q, 0.05) / 4) * 100);
+---
+{rain && (
+  <section class="rain" aria-labelledby="rain-h">
+    <h2 id="rain-h">Rain expected next 3 days</h2>
+    <p><strong>{word}</strong>: {q <= 0 ? range : `about ${range}`} here. <span class="muted">{note}</span></p>
+    <div class="track" aria-hidden="true"><span style={`width:${pct}%`}></span></div>
+    <div class="scale small muted" aria-hidden="true"><span>0</span><span>1 in</span><span>2 in</span><span>3 in</span><span>4+ in</span></div>
+    <p class="small muted">NWS Weather Prediction Center 72-hour forecast{rain.valid_to && `, through ${fmtTime(rain.valid_to, tz, true)}`}. Area forecast, not exact for this spot.</p>
+  </section>
+)}
+<style>
+  .rain { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 2rem; display: grid; gap: 0.5rem; }
+  .track { height: 0.7rem; border-radius: 99px; background: linear-gradient(90deg, #e3eef4, #e3eef4); overflow: hidden; }
+  .track span { display: block; height: 100%; background: linear-gradient(90deg, #7fb8d6, #1f5673); border-radius: 99px; }
+  .scale { display: flex; justify-content: space-between; }
+</style>

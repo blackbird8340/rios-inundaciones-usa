@@ -64,6 +64,7 @@ export async function getGaugePage(slug: string) {
     lastObservation: (lastObs as any[])[0] ?? null,
     camera: ((cams as any[])[0] ?? null) as Camera | null,
     normals: await flowNormalsFor(g.usgs_id, g.time_zone),
+    rain: await rainFor(g.id),
   };
 }
 
@@ -265,4 +266,13 @@ export async function getFloodingNow() {
     ),
   ]);
   return { now, forecast: (fc as any[]).map((r) => ({ ...r, name: cleanName(r.name), forecast_crest_ft: Number(r.forecast_crest_ft) })) };
+}
+
+export type Rain = { qpf_in: number; next_in: number | null; valid_from: Date | null; valid_to: Date | null; issued_at: Date | null };
+export async function rainFor(gaugeId: number): Promise<Rain | null> {
+  try {
+    const [[r]] = await db().execute<any[]>('SELECT qpf_in, next_in, valid_from, valid_to, issued_at FROM gauge_rain WHERE gauge_id = ?', [gaugeId]);
+    if (!r || (r.valid_to && r.valid_to.getTime() < Date.now() - 12 * 3600_000)) return null;
+    return { ...r, qpf_in: Number(r.qpf_in), next_in: r.next_in == null ? null : Number(r.next_in) };
+  } catch { return null; }
 }

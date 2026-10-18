@@ -47,3 +47,5 @@ jobs:
       - run: npm run ingest:levels
       - run: npm run ingest:alerts
       - run: npm run ingest:forecasts
+      - name: 72h rain (WPC QPF, non-fatal)
+        run: npm run ingest:rain || echo 'rain failed'

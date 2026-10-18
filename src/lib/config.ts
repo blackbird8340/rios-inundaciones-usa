@@ -15,3 +15,4 @@ export const NWS_API_BASE = 'https://api.weather.gov';
 export const RTFI_BASE = 'https://api.waterdata.usgs.gov/rtfi-api';
 export const NIMS_BASE = 'https://api.waterdata.usgs.gov/nims/v0';
 export const USGS_STATS_BASE = 'https://api.waterdata.usgs.gov/statistics/v0';
+export const WPC_QPF_72H = 'https://mapservices.weather.noaa.gov/vector/rest/services/precip/wpc_qpf/MapServer/9';
