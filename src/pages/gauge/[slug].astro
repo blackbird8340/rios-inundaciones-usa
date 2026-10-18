@@ -11,6 +11,7 @@ import { countySlug, getGaugePage, gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
 import { ago, cfs, fmtDate, fmtTime, ft, ianaZone } from '../../lib/format.ts';
 import { STALE_AFTER_MIN } from '../../lib/config.ts';
+import { floodName } from '../../lib/historic.ts';
 
 const data = await getGaugePage(Astro.params.slug!);
 if (!data) {
@@ -60,7 +61,7 @@ const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : 
 const forecastText = forecastSentence(stage, observedAt, forecast, cats, tz);
 const recordText = vsRecord != null && record
   ? vsRecord >= 0
-    ? `${vsRecord.toFixed(1)} ft below the record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
+    ? `${vsRecord.toFixed(1)} ft below the record crest of ${new Date(record.occurred_at).getUTCFullYear()}${floodName(record.occurred_at, g.state_code) ? `, ${floodName(record.occurred_at, g.state_code)},` : ''} (${ft(record.stage_ft)}).`
     : `${(-vsRecord).toFixed(1)} ft above the previous record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
   : null;
 const shareText = stage != null ? `${g.name}, ${g.state_code}: ${ft(stage, 1)} (${STATUS_META[status].label.toLowerCase()})` : `${g.name}, ${g.state_code} river level`;
@@ -74,13 +75,14 @@ const crumbs = [
   ...(g.river_slug ? [{ name: river, href: `/river/${g.river_slug}/` }] : []),
   { name: g.place_name ?? g.name, href: path },
 ];
+const recName = record ? floodName(record.occurred_at, g.state_code) : null;
 const recYear = record ? new Date(record.occurred_at).getUTCFullYear() : null;
 const faqs: [string, string][] = [];
 if (g.minor_ft != null) faqs.push([`What is the flood stage of the ${g.name}?`, `The National Weather Service flood stage at this gauge is ${ft(g.minor_ft)}.${g.action_ft != null ? ` Action stage is ${ft(g.action_ft)}` : ''}${g.moderate_ft != null ? `, moderate flood stage ${ft(g.moderate_ft)}` : ''}${g.major_ft != null ? ` and major flood stage ${ft(g.major_ft)}` : ''}${g.action_ft != null || g.moderate_ft != null || g.major_ft != null ? '.' : ''}`]);
 faqs.push([`Is the ${g.name} flooding today?`, stage == null || status === 'no_data'
   ? 'There is no recent reading from this gauge, so we cannot say. Check weather.gov for official information.'
   : `${['minor', 'moderate', 'major'].includes(status) ? 'Yes' : 'No'}. At the latest reading${observedAt ? ` (${fmtTime(observedAt, tz, true)})` : ''} the river was at ${ft(stage, 1)}, which is ${STATUS_META[status].label.toLowerCase()}.`]);
-if (record && recYear) faqs.push([`What is the record crest at ${g.place_name ?? g.name}?`, `The highest crest on record is ${ft(record.stage_ft)}, on ${fmtDate(record.occurred_at)}${record.preliminary ? ' (preliminary)' : ''}.`]);
+if (record && recYear) faqs.push([`What is the record crest at ${g.place_name ?? g.name}?`, `The highest crest on record is ${ft(record.stage_ft)}, on ${fmtDate(record.occurred_at)}${record.preliminary ? ' (preliminary)' : ''}${recName ? `, likely during ${recName}` : ''}.`]);
 if (forecastText) faqs.push([`What is the forecast for the ${g.name}?`, `${forecastText} Forecast issued by the NWS${fcIssued ? ` ${fmtTime(fcIssued, tz, true)}` : ''}.`]);
 const jsonLd = [
   { '@context': 'https://schema.org', '@type': 'BreadcrumbList',
@@ -187,13 +189,14 @@ const jsonLd = [
             <tbody>
               {crests.map((c) => (
                 <tr>
-                  <td>{fmtDate(c.occurred_at)}{c.preliminary ? ' (prelim.)' : ''}</td>
+                  <td>{fmtDate(c.occurred_at)}{c.preliminary ? ' (prelim.)' : ''}{floodName(c.occurred_at, g.state_code) && <span class="evn">{floodName(c.occurred_at, g.state_code)}</span>}</td>
                   <td>{ft(c.stage_ft)}</td>
                   <td class="muted">{stage != null ? `+${(c.stage_ft - stage).toFixed(1)} ft` : '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p class="small muted">Storm names are matched by date and state; they're our best attribution, not an official NWS label.</p>
         </section>
       )}
 
@@ -304,6 +307,7 @@ const jsonLd = [
   .crests th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--rule); }
   .crests td { padding: 0.55rem 0.9rem; border-top: 1px solid #e6ecef; }
   .crests tbody tr:first-child td { font-weight: 700; }
+  .evn { display: block; font-size: 0.78rem; font-weight: 600; color: var(--water-deep); }
 
   .neighbors, .sources { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
   .dir { display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
