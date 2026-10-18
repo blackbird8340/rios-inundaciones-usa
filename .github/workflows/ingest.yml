@@ -4,7 +4,7 @@
 name: ingest
 on:
   schedule:
-    - cron: '7,37 * * * *'   # cada 30 min (GitHub puede demorar unos minutos)
+    - cron: '11,41 * * * *'  # cada 30 min (GitHub puede demorar unos minutos; re-registrado 2026-10-18)
     - cron: '17 9 * * *'     # metadatos + clasificación, 1 vez por día
   workflow_dispatch:
     inputs:
