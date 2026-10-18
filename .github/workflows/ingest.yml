@@ -19,6 +19,8 @@ on:
 concurrency:
   group: ingest
   cancel-in-progress: false
+permissions:
+  contents: read
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -49,6 +51,46 @@ jobs:
       - run: npm run ingest:forecasts
       - name: 72h rain (WPC QPF, non-fatal; every 3 h to save Actions minutes, WPC updates ~4x/day)
         run: |
-          if [ $(( 10#$(date -u +%H) % 3 )) -eq 0 ] && [ $(( 10#$(date -u +%M) )) -lt 30 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ $(( 10#$(date -u +%H) % 3 )) -eq 0 ] && [ $(( 10#$(date -u +%M) )) -lt 30 ] || [ "${{ inputs.full }}" = "true" ] || [ "${{ inputs.extras }}" = "true" ]; then
             npm run ingest:rain || echo 'rain failed'
           else echo 'skip rain this run'; fi
+
+  # Plan B mientras el cron de GitHub no dispara: al terminar (aunque la ingesta falle), espera al próximo
+  # turno (:11 / :41 UTC) y se vuelve a lanzar con workflow_dispatch. Repo público: minutos sin costo.
+  # Frenos: no lanza si ya hay otra corrida en cola o en curso, ni si el cron disparó en los últimos 40 min.
+  chain:
+    needs: ingest
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Wait for the next 30-min slot
+        run: |
+          now=$(date -u +%s)
+          m=$(( 10#$(date -u +%M) )); s=$(( 10#$(date -u +%S) ))
+          if [ $m -lt 11 ]; then t=11; elif [ $m -lt 41 ]; then t=41; else t=71; fi
+          wait=$(( (t - m) * 60 - s ))
+          [ $wait -lt 60 ] && wait=$(( wait + 1800 ))
+          next=$(( now + wait ))
+          echo "NEXT_EPOCH=$next" >> "$GITHUB_ENV"
+          echo "sleeping ${wait}s until $(date -u -d @$next +%H:%M)"
+          sleep $wait
+      - name: Re-dispatch ingest (guarded)
+        run: |
+          busy=$(gh api "repos/$REPO/actions/workflows/ingest.yml/runs?per_page=20" \
+            --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.status==\"queued\" or .status==\"in_progress\" or .status==\"pending\" or .status==\"waiting\")] | length")
+          if [ "$busy" -gt 0 ]; then echo "another ingest run is queued/running ($busy); not chaining"; exit 0; fi
+          since=$(date -u -d '40 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          sched=$(gh api "repos/$REPO/actions/workflows/ingest.yml/runs?event=schedule&per_page=5" \
+            --jq "[.workflow_runs[] | select(.created_at >= \"$since\")] | length")
+          if [ "$sched" -gt 0 ]; then echo "cron schedule is firing again; stopping the chain"; exit 0; fi
+          full=false
+          [ "$(date -u -d @$NEXT_EPOCH +%H)" = "09" ] && [ $(( 10#$(date -u -d @$NEXT_EPOCH +%M) )) -lt 30 ] && full=true
+          gh workflow run ingest.yml --repo "$REPO" --ref main -f full=$full
+          echo "dispatched next ingest (full=$full)"
