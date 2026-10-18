@@ -1,0 +1,17 @@
+---
+interface Props { src: string; title: string }
+const { src, title } = Astro.props;
+const code = `<iframe src="${src}" title="${title.replace(/"/g, '')}" width="100%" height="140" style="border:0;max-width:480px" loading="lazy"></iframe>`;
+---
+<details class="embed">
+  <summary>Embed this gauge on your site</summary>
+  <p class="small muted">Free for news sites, towns, schools and blogs. Updates automatically.</p>
+  <textarea readonly rows="3" onclick="this.select()">{code}</textarea>
+  <iframe src={src} title={`Preview: ${title}`} width="100%" height="140" style="border:0;max-width:480px" loading="lazy"></iframe>
+</details>
+<style>
+  .embed { margin-top: 1.5rem; background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 0.2rem 1rem; }
+  .embed summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
+  .embed textarea { width: 100%; font: 0.8rem/1.4 ui-monospace, monospace; margin: 0.4rem 0 0.8rem; box-sizing: border-box; }
+  .embed iframe { margin-bottom: 0.8rem; }
+</style>

@@ -5,6 +5,7 @@ import StageChart from '../../components/StageChart.astro';
 import ShareButton from '../../components/ShareButton.astro';
 import Webcam from '../../components/Webcam.astro';
 import FlowVsNormal from '../../components/FlowVsNormal.astro';
+import EmbedCode from '../../components/EmbedCode.astro';
 import { forecastSentence } from '../../lib/insights.ts';
 import { countySlug, getGaugePage, gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
@@ -220,6 +221,7 @@ const jsonLd = [
   <section class="faq" aria-labelledby="faq-h">
     <h2 id="faq-h">Questions about this gauge</h2>
     {faqs.map(([q, a]) => <details><summary>{q}</summary><p>{a}</p></details>)}
+    <EmbedCode src={`${origin}/embed/${g.slug}/`} title={`${g.name} river level`} />
     <p class="small muted">How we calculate this: <a href="/methodology/">methodology</a> · <a href="/sources/">sources</a>.</p>
   </section>
 </Base>
