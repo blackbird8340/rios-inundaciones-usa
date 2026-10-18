@@ -1,0 +1,19 @@
+---
+import { GLOSSARY } from '../lib/glossary.ts';
+interface Props { ids?: string[]; heading?: string }
+const { ids, heading = 'What these words mean' } = Astro.props;
+const items = ids ? GLOSSARY.filter((g) => ids.includes(g.id)) : GLOSSARY;
+---
+<section class="gl" aria-labelledby="gl-h">
+  <h2 id="gl-h">{heading}</h2>
+  <dl>{items.map((g) => <div id={`term-${g.id}`}><dt>{g.term}</dt><dd>{g.text}</dd></div>)}</dl>
+  {ids && <p class="small"><a href="/glossary/">Full flood glossary →</a></p>}
+</section>
+<style>
+  .gl { margin-top: 2.5rem; }
+  .gl h2 { margin-bottom: 0.75rem; }
+  .gl dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem; margin: 0; }
+  .gl dl div { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; padding: 0.75rem 0.9rem; }
+  .gl dt { font-weight: 700; }
+  .gl dd { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.92rem; }
+</style>

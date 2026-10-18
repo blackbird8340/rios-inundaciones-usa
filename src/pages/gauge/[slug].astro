@@ -169,7 +169,7 @@ const jsonLd = [
   <div class="layout">
     <section class="ladder-col" aria-labelledby="ladder-h">
       <h2 id="ladder-h">What floods at each level</h2>
-      <p class="lede muted">National Weather Service impact statements for this gauge. The shaded part is under water at the current level. Use the slider to see what floods at other heights.</p>
+      <p class="lede muted">National Weather Service impact statements for this gauge. The shaded part is under water at the current level. Use the slider to see what floods at other heights. <a href="/glossary/">What do these stages mean?</a></p>
       {impacts.length || g.action_ft != null ? (
         <FloodLadder categories={cats} impacts={impacts} stage={stage} trend={g.trend} forecastCrest={g.forecast_crest_ft} record={record} />
       ) : (
