@@ -47,5 +47,8 @@ jobs:
       - run: npm run ingest:levels
       - run: npm run ingest:alerts
       - run: npm run ingest:forecasts
-      - name: 72h rain (WPC QPF, non-fatal)
-        run: npm run ingest:rain || echo 'rain failed'
+      - name: 72h rain (WPC QPF, non-fatal; every 3 h to save Actions minutes, WPC updates ~4x/day)
+        run: |
+          if [ $(( 10#$(date -u +%H) % 3 )) -eq 0 ] && [ $(( 10#$(date -u +%M) )) -lt 30 ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            npm run ingest:rain || echo 'rain failed'
+          else echo 'skip rain this run'; fi
