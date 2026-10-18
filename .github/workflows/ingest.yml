@@ -2,12 +2,10 @@
 # Secrets necesarios (Settings → Secrets and variables → Actions):
 #   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, USGS_API_KEY
 name: ingest
-# El cron queda apagado hasta cargar los secrets (si no, falla cada 30 min y gasta minutos).
-# Para activarlo, descomentar el bloque schedule.
 on:
-  # schedule:
-  #   - cron: '7,37 * * * *'   # cada 30 min (GitHub puede demorar unos minutos)
-  #   - cron: '17 9 * * *'     # metadatos + clasificación, 1 vez por día
+  schedule:
+    - cron: '7,37 * * * *'   # cada 30 min (GitHub puede demorar unos minutos)
+    - cron: '17 9 * * *'     # metadatos + clasificación, 1 vez por día
   workflow_dispatch:
     inputs:
       full:
