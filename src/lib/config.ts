@@ -13,3 +13,4 @@ export const NWPS_BASE = 'https://api.water.noaa.gov/nwps/v1';
 export const USGS_OGC_BASE = 'https://api.waterdata.usgs.gov/ogcapi/v1';
 export const NWS_API_BASE = 'https://api.weather.gov';
 export const RTFI_BASE = 'https://api.waterdata.usgs.gov/rtfi-api';
+export const NIMS_BASE = 'https://api.waterdata.usgs.gov/nims/v0';

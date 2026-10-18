@@ -1,0 +1,20 @@
+---
+// Última foto de la webcam USGS HIVIS del medidor (dominio público, servida desde el bucket público de USGS).
+import { cameraImage, type Camera } from '../lib/queries.ts';
+import { ago } from '../lib/format.ts';
+interface Props { camera: Camera; alt: string }
+const { camera, alt } = Astro.props;
+const old = !camera.newest_at || Date.now() - camera.newest_at.getTime() > 6 * 3600_000;
+---
+<figure class="cam">
+  <img src={cameraImage(camera)} alt={alt} loading="lazy" decoding="async" width="720" height="405" referrerpolicy="no-referrer" />
+  <figcaption class="small">
+    <span><strong>Live river camera</strong>{camera.newest_at && <> · photo {ago(camera.newest_at)}</>}{old && ' (camera may be offline)'}</span>
+    <a href={`https://apps.usgs.gov/hivis/camera/${encodeURIComponent(camera.cam_id)}`} rel="noopener">USGS HIVIS · more photos & timelapse</a>
+  </figcaption>
+</figure>
+<style>
+  .cam { margin: 0 0 2rem; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .cam img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; background: var(--water-tint, #dfeaf0); }
+  .cam figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.3rem 1rem; padding: 0.6rem 0.9rem; color: var(--muted); }
+</style>

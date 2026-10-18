@@ -1,0 +1,34 @@
+---
+import Base from '../layouts/Base.astro';
+import { cameraImage, listCameras } from '../lib/queries.ts';
+import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
+import { ago, ft } from '../lib/format.ts';
+const cams = await listCameras();
+Astro.response.headers.set('Cache-Control', 'public, max-age=600, stale-while-revalidate=1200');
+---
+<Base title="Live River Cameras – See the River Now (USGS Webcams)" description={`${cams.length} live USGS river webcams next to river gauges, with the current level and flood status of each river.`} canonicalPath="/webcams/">
+  <ol class="crumbs" slot="crumbs"><li><a href="/webcams/">River cameras</a></li></ol>
+  <h1 class="h">Live river cameras</h1>
+  <p class="muted lede">Latest photos from U.S. Geological Survey cameras (HIVIS) at river gauges, next to each river's current level. Photos refresh every few minutes to hours.</p>
+  <ul class="grid">
+    {cams.map((c) => (
+      <li>
+        <a href={`/gauge/${c.slug}/`}>
+          <img src={cameraImage(c)} alt={`Latest camera photo: ${c.gauge_name}`} loading="lazy" width="720" height="405" referrerpolicy="no-referrer" />
+          <strong>{c.gauge_name}, {c.state_code}</strong>
+        </a>
+        <span class="small muted">{ft(c.stage_ft)} · {STATUS_META[c.status as FloodStatus].label}{c.newest_at && <> · photo {ago(c.newest_at)}</>}</span>
+      </li>
+    ))}
+  </ul>
+  <p class="small muted">Images: USGS HIVIS (public domain). Not an emergency service.</p>
+</Base>
+<style>
+  .h { font: 800 clamp(2.2rem, 7vw, 3.6rem)/0.95 var(--display); text-transform: uppercase; margin-top: 1.5rem; }
+  .lede { margin: 0.7rem 0 1.5rem; max-width: 44rem; }
+  .grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); gap: 1rem; }
+  .grid li { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; display: grid; gap: 0.3rem; padding-bottom: 0.7rem; }
+  .grid a { display: grid; gap: 0.5rem; color: inherit; text-decoration: none; }
+  .grid img { width: 100%; height: auto; aspect-ratio: 16/9; object-fit: cover; background: #dfeaf0; }
+  .grid strong, .grid .small { padding-inline: 0.8rem; }
+</style>

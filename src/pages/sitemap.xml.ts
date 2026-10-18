@@ -15,7 +15,7 @@ export const GET: APIRoute = async ({ url }) => {
   const u = (path: string, lastmod?: Date | null) =>
     `<url><loc>${o}${path}</loc>${lastmod ? `<lastmod>${lastmod.toISOString()}</lastmod>` : ''}</url>`;
   const body = [
-    u('/'), u('/rising/'), u('/about/'), u('/methodology/'), u('/sources/'),
+    u('/'), u('/rising/'), u('/webcams/'), u('/about/'), u('/methodology/'), u('/sources/'),
     ...states.map((s) => u(`/${s.slug}/`)),
     ...counties.map((c) => u(`/${c.state_slug}/${c.slug}/`)),
     ...rivers.map((r) => u(`/river/${r.slug}/`)),

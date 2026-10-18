@@ -47,6 +47,9 @@ export async function getGaugePage(slug: string) {
   const [[alertsRun]] = await db().execute<any[]>(
     "SELECT MAX(finished_at) t FROM ingest_runs WHERE job = 'alerts' AND ok",
   );
+  const [cams] = g.usgs_id
+    ? await db().execute<any[]>('SELECT cam_id, name, small_dir, newest_at FROM cameras WHERE usgs_id = ? ORDER BY newest_at DESC LIMIT 1', [g.usgs_id])
+    : [[]];
 
   return {
     gauge: g,
@@ -59,6 +62,7 @@ export async function getGaugePage(slug: string) {
     upstream: (neighbors as any[]).map((n) => ({ ...n, name: cleanName(n.name) })).find((n) => n.lid === g.upstream_lid) ?? null,
     downstream: (neighbors as any[]).map((n) => ({ ...n, name: cleanName(n.name) })).find((n) => n.lid === g.downstream_lid) ?? null,
     lastObservation: (lastObs as any[])[0] ?? null,
+    camera: ((cams as any[])[0] ?? null) as Camera | null,
   };
 }
 
@@ -175,4 +179,17 @@ export async function getCountyPage(stateSlug: string, slug: string) {
     alerts: alerts as any[],
     alertsCheckedAt: (alertsRun?.t as Date | null) ?? null,
   };
+}
+
+export type Camera = { cam_id: string; name: string; small_dir: string; newest_at: Date | null };
+export const cameraImage = (c: Camera) =>
+  `${c.small_dir}${c.cam_id}_newest.jpg${c.newest_at ? `?ts=${encodeURIComponent(c.newest_at.toISOString())}` : ''}`;
+
+// Todas las webcams con su medidor (página /webcams/).
+export async function listCameras() {
+  const [rows] = await db().execute<any[]>(
+    `SELECT c.cam_id, c.name, c.small_dir, c.newest_at, g.slug, g.name gauge_name, g.state_code, IF(g.stage_ft IS NULL, 'no_data', g.status) status, g.stage_ft
+     FROM cameras c JOIN gauges g ON g.usgs_id = c.usgs_id ORDER BY g.state_code, g.name`,
+  );
+  return (rows as any[]).map((r) => ({ ...r, gauge_name: cleanName(r.gauge_name) }));
 }
