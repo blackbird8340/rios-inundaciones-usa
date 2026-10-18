@@ -173,3 +173,14 @@ CREATE TABLE IF NOT EXISTS nws_zones (
   geojson MEDIUMTEXT NULL,
   fetched_at DATETIME NOT NULL
 );
+
+-- Lluvia pronosticada 72 h (WPC QPF) en el punto del medidor: banda [qpf_in, next_in). scripts/ingest/rain.ts
+CREATE TABLE IF NOT EXISTS gauge_rain (
+  gauge_id INT PRIMARY KEY,
+  qpf_in DOUBLE NOT NULL,
+  next_in DOUBLE NULL,
+  valid_from DATETIME NULL,
+  valid_to DATETIME NULL,
+  issued_at DATETIME NULL,
+  FOREIGN KEY (gauge_id) REFERENCES gauges(id) ON DELETE CASCADE
+);
