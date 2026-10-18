@@ -1,0 +1,17 @@
+---
+import Base from '../layouts/Base.astro';
+import RisingList from '../components/RisingList.astro';
+import { getRisingFastest } from '../lib/insights.ts';
+const rows = await getRisingFastest(50);
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+---
+<Base title="Rivers rising fastest today" description="River gauges with the largest rise in the last 24 hours, from USGS and NWS readings." canonicalPath="/rising/">
+  <ol class="crumbs" slot="crumbs"><li><a href="/rising/">Rising fastest</a></li></ol>
+  <h1 class="h">Rising fastest today</h1>
+  <p class="muted lede">Largest rise over the last 24 hours: the latest reading (within 3 hours) compared with the reading closest to 24 hours earlier. Gauges without a reading in that window are left out, as are tidal gauges (MLLW datum). Reservoir and sound gauges can move with dam releases or wind.</p>
+  <RisingList rows={rows} />
+</Base>
+<style>
+  .h { font: 800 clamp(2.2rem, 7vw, 3.5rem)/1 var(--display); text-transform: uppercase; margin: 2rem 0 0.75rem; }
+  .lede { max-width: 44rem; margin-bottom: 1.25rem; }
+</style>

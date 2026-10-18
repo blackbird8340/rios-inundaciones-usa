@@ -3,8 +3,13 @@ import Base from '../layouts/Base.astro';
 import { getHomeData, type HomeGauge } from '../lib/queries.ts';
 import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
 import { ft, fmtDate, ago } from '../lib/format.ts';
+import ImpactSlider from '../components/ImpactSlider.astro';
+import RisingList from '../components/RisingList.astro';
+import { getRisingFastest, getImpactSliderData } from '../lib/insights.ts';
 
-const { gauges, records, states } = await getHomeData();
+const [{ gauges, records, states }, rising, featured] = await Promise.all([
+  getHomeData(), getRisingFastest(5), getImpactSliderData('ohio-river-at-pittsburgh-pttp1'),
+]);
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 
 const st = (g: HomeGauge) => g.status as FloodStatus;
@@ -129,6 +134,12 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
     )}
   </section>
 
+  <section class="block" aria-labelledby="rising-h">
+    <h2 id="rising-h">Rising fastest today</h2>
+    <p class="muted small">Largest rise in the last 24 hours. <a href="/rising/">See the full list</a>.</p>
+    <RisingList rows={rising} />
+  </section>
+
   <section class="block" aria-labelledby="map-h">
     <h2 id="map-h">Map of gauges</h2>
     <p class="muted small">Each dot is a gauge, colored by its current NWS flood category. Flooding gauges pulse. Tap a dot for details.</p>
@@ -169,6 +180,13 @@ const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: pr
         ))}
       </ol>
     </section>
+  )}
+
+  {featured && (
+    <div class="block">
+      <ImpactSlider categories={featured.gauge} impacts={featured.impacts} stage={featured.gauge.stage_ft} record={featured.record}
+        heading="What floods at each level?" gaugeName={`${featured.gauge.name}, ${featured.gauge.state_code}`} gaugeHref={`/gauge/${featured.gauge.slug}/`} />
+    </div>
   )}
 
   <section class="block explain" aria-labelledby="how-h">

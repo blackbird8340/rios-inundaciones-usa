@@ -1,0 +1,29 @@
+---
+import type { RisingRow } from '../lib/insights.ts';
+import { STATUS_META } from '../lib/flood.ts';
+interface Props { rows: RisingRow[] }
+const { rows } = Astro.props;
+---
+{rows.length === 0 ? (
+  <p class="calm">No gauge has risen in the last 24 hours with recent readings.</p>
+) : (
+  <ol class="rising">
+    {rows.map((r) => (
+      <li style={`--cat: var(--cat-${r.status})`}>
+        <a href={`/gauge/${r.slug}/`}>{r.name}, {r.state_code}</a>
+        <span class="rise">+{r.rise_ft.toFixed(2)} ft</span>
+        <span class="small muted">{r.ref_ft.toFixed(2)} → {r.stage_ft.toFixed(2)} ft · <span class="pill">{STATUS_META[r.status].label}</span></span>
+      </li>
+    ))}
+  </ol>
+)}
+<style>
+  .rising { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; counter-reset: r; }
+  .rising li { display: grid; grid-template-columns: 2rem 1fr auto; gap: 0.1rem 0.75rem; padding: 0.75rem 1rem; counter-increment: r; border-left: 6px solid var(--cat); }
+  .rising li + li { border-top: 1px solid var(--rule); }
+  .rising li::before { content: counter(r); grid-row: span 2; font: 800 1.4rem/1 var(--display); color: var(--muted); }
+  .rise { font: 800 1.4rem/1 var(--display); color: #b00020; text-align: right; }
+  .rising .small { grid-column: 2 / -1; }
+  .pill { font: 700 0.68rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.2rem 0.45rem; border-radius: 99px; background: var(--cat); color: var(--ink); }
+  .calm { padding: 1rem 1.2rem; background: var(--card); border-left: 6px solid var(--cat-normal); border-radius: 6px; }
+</style>

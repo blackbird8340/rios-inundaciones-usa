@@ -1,0 +1,128 @@
+---
+// Deslizador "qué se inunda a cada nivel": mueve el agua y marca los impactos NWS alcanzados.
+// Todo sale de gauge_impacts + umbrales + cresta récord; sin impactos, cae a umbrales o a un aviso.
+import { STATUS_META, statusFor, type Categories } from '../lib/flood.ts';
+
+interface Props {
+  categories: Categories;
+  impacts: { stage_ft: number; statement: string }[];
+  stage: number | null;
+  record: { stage_ft: number; occurred_at: Date } | null;
+  heading?: string;
+  gaugeName?: string;
+  gaugeHref?: string;
+}
+const { categories: c, impacts, stage, record, heading = 'Slide to see what floods', gaugeName, gaugeHref } = Astro.props;
+
+type Item = { v: number; text: string; tag?: string };
+const items: Item[] = impacts.map((i) => ({ v: Number(i.stage_ft), text: i.statement }));
+const th: [keyof Categories, string][] = [['action_ft', 'Action stage'], ['minor_ft', 'Flood stage'], ['moderate_ft', 'Moderate flood stage'], ['major_ft', 'Major flood stage']];
+for (const [k, label] of th) if (c[k] != null) items.push({ v: Number(c[k]), text: label, tag: 'threshold' });
+if (record) items.push({ v: Number(record.stage_ft), text: `Record crest (${new Date(record.occurred_at).getUTCFullYear()})`, tag: 'record' });
+items.sort((a, b) => a.v - b.v);
+
+const hasImpacts = impacts.length > 0;
+const usable = items.length >= 2;
+const levels = items.map((i) => i.v);
+const lo = Math.floor(Math.min(...levels, stage ?? Infinity) - 2);
+const hi = Math.ceil(Math.max(...levels, stage ?? -Infinity) + 2);
+const start = stage != null ? Math.min(hi, Math.max(lo, stage)) : (c.minor_ft ?? levels[0]);
+const pct = (v: number) => ((v - lo) / (hi - lo || 1)) * 100;
+const statusData = JSON.stringify({ ...c, labels: Object.fromEntries(Object.entries(STATUS_META).map(([k, m]) => [k, m.label])) });
+const initial = statusFor(start, c);
+---
+<section class="islider" data-cats={statusData} data-lo={lo} data-hi={hi}>
+  <h2>{heading}</h2>
+  {gaugeName && <p class="muted small">{gaugeHref ? <a href={gaugeHref}>{gaugeName}</a> : gaugeName} · National Weather Service impact statements</p>}
+  {!usable ? (
+    <p class="muted">The National Weather Service hasn't published flood levels or impacts for this gauge.</p>
+  ) : (
+    <div class="wrap">
+      <div class="tank" aria-hidden="true">
+        {items.map((i) => <span class:list={['mark', i.tag]} style={`bottom: ${pct(i.v)}%`}></span>)}
+        {stage != null && <span class="now" style={`bottom: ${pct(stage)}%`}><b>now</b></span>}
+        <span class="fill" style={`height: ${pct(start)}%`}></span>
+      </div>
+      <div class="panel">
+        <label class="lab">
+          <span>River height: <output class="out">{start.toFixed(1)} ft</output> <span class="st" style={`--c: var(--cat-${initial})`}>{STATUS_META[initial].label}</span></span>
+          <input type="range" min={lo} max={hi} step="0.1" value={start.toFixed(1)} aria-describedby="islider-note" />
+        </label>
+        <p class="sum small muted" aria-live="polite"></p>
+        {!hasImpacts && <p id="islider-note" class="small muted">No NWS impact statements for this gauge; showing flood thresholds only.</p>}
+        <ol class="list">
+          {[...items].reverse().map((i) => (
+            <li data-v={i.v} class:list={[i.tag, { on: i.v <= start }]}><span class="v">{i.v.toFixed(1)} ft</span><span>{i.text}</span></li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  )}
+</section>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('.islider')) {
+    const input = root.querySelector<HTMLInputElement>('input[type=range]');
+    if (!input) continue;
+    const lo = Number(root.dataset.lo), hi = Number(root.dataset.hi);
+    const c = JSON.parse(root.dataset.cats!);
+    const fill = root.querySelector<HTMLElement>('.fill')!;
+    const out = root.querySelector('output')!;
+    const st = root.querySelector<HTMLElement>('.st')!;
+    const sum = root.querySelector<HTMLElement>('.sum')!;
+    const lis = [...root.querySelectorAll<HTMLLIElement>('.list li')];
+    const status = (v: number) =>
+      c.major_ft != null && v >= c.major_ft ? 'major' : c.moderate_ft != null && v >= c.moderate_ft ? 'moderate'
+      : c.minor_ft != null && v >= c.minor_ft ? 'minor' : c.action_ft != null && v >= c.action_ft ? 'action' : 'normal';
+    const update = () => {
+      const v = Number(input.value);
+      fill.style.height = `${((v - lo) / (hi - lo)) * 100}%`;
+      out.textContent = `${v.toFixed(1)} ft`;
+      const s = status(v);
+      st.textContent = c.labels[s];
+      st.style.setProperty('--c', `var(--cat-${s})`);
+      let n = 0;
+      for (const li of lis) {
+        const on = Number(li.dataset.v) <= v;
+        li.classList.toggle('on', on);
+        if (on && !li.classList.contains('threshold') && !li.classList.contains('record')) n++;
+      }
+      sum.textContent = n ? `${n} impact${n === 1 ? '' : 's'} reached at ${v.toFixed(1)} ft.` : `No listed impacts at ${v.toFixed(1)} ft.`;
+    };
+    input.addEventListener('input', update);
+    update();
+  }
+</script>
+
+<style>
+  .islider { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 1.1rem; }
+  .islider h2 { margin-bottom: 0.25rem; }
+  .wrap { display: grid; grid-template-columns: 4.5rem 1fr; gap: 1rem; margin-top: 0.9rem; }
+  .tank {
+    position: relative; border-radius: 8px; overflow: hidden; min-height: 16rem; max-height: 26rem;
+    background: repeating-linear-gradient(to top, var(--rule) 0 1px, transparent 1px 0.6rem), var(--water-tint);
+  }
+  .fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#4a92b3, #1f5673); transition: height 0.25s ease-out; }
+  .fill::before {
+    content: ''; position: absolute; top: -6px; left: 0; width: 200%; height: 8px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='8' viewBox='0 0 36 8'%3E%3Cpath d='M0 4Q9 0 18 4T36 4V8H0Z' fill='%234a92b3'/%3E%3C/svg%3E") repeat-x;
+    animation: isl-drift 3s linear infinite;
+  }
+  @keyframes isl-drift { to { transform: translateX(-36px); } }
+  .mark { position: absolute; left: 0; width: 40%; height: 2px; background: var(--ink); opacity: 0.35; z-index: 1; }
+  .mark.threshold { width: 100%; height: 3px; opacity: 0.8; background: var(--cat-minor); }
+  .mark.record { width: 100%; height: 0; border-top: 2px dashed var(--ink); opacity: 0.9; }
+  .now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid #fff; z-index: 2; }
+  .now b { position: absolute; right: 2px; top: -1.1rem; font: 700 0.65rem var(--body); text-transform: uppercase; color: var(--ink); }
+  .lab { display: grid; gap: 0.4rem; font-weight: 600; }
+  .out { font: 800 1.6rem/1 var(--display); }
+  .st { font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.3rem 0.5rem; border-radius: 99px; background: var(--c); vertical-align: middle; }
+  input[type=range] { width: 100%; accent-color: var(--water-deep); min-height: 2rem; }
+  .sum { margin: 0.3rem 0 0.6rem; }
+  .list { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow: auto; border-top: 1px solid var(--rule); }
+  .list li { display: grid; grid-template-columns: 4.2rem 1fr; gap: 0.6rem; padding: 0.5rem 0.2rem; border-bottom: 1px solid var(--rule); font-size: 0.9rem; color: var(--muted); transition: background 0.2s, color 0.2s; }
+  .list li.on { color: var(--ink); background: rgb(47 111 143 / 0.1); }
+  .list li.threshold, .list li.record { font-weight: 700; }
+  .list .v { font: 800 1.05rem/1.2 var(--display); }
+  @media (max-width: 30rem) { .wrap { grid-template-columns: 3rem 1fr; } }
+</style>
