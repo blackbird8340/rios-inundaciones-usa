@@ -1,10 +1,11 @@
 ---
 import Base from '../../layouts/Base.astro';
 import AreaPage from '../../components/AreaPage.astro';
-import { getStatePage } from '../../lib/queries.ts';
+import { getStatePage, listCounties } from '../../lib/queries.ts';
 const data = await getStatePage(Astro.params.state!);
 if (!data) return new Response(null, { status: 404 });
 const { state, gauges } = data;
+const counties = await listCounties(state.code);
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 const path = `/${state.slug}/`;
 const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
@@ -17,5 +18,19 @@ const jsonLd = [
 ---
 <Base title={`${state.name} River Levels Today – Flood Stages & Forecasts`} description={`Live river levels for ${gauges.length} gauges in ${state.name}: which rivers are at action stage or flooding now, by river.`} canonicalPath={path} jsonLd={jsonLd}>
   <ol class="crumbs" slot="crumbs"><li><a href={path}>{state.name}</a></li></ol>
-  <AreaPage heading={`${state.name} river levels`} lede={`Live readings from ${gauges.length} river gauges in ${state.name}, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river" />
+  <AreaPage heading={`${state.name} river levels`} lede={`Live readings from ${gauges.length} river gauges in ${state.name}, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river">
+  </AreaPage>
+  <section class="counties" aria-labelledby="counties-h">
+    <h2 id="counties-h">{state.name} flooding by county</h2>
+    <ul>
+      {counties.map((c) => <li><a href={`/${state.slug}/${c.slug}/`}>{c.county_name} County</a> <span class="muted small">{c.n}{c.flooding ? ` · ${c.flooding} flooding` : ''}</span></li>)}
+    </ul>
+  </section>
 </Base>
+
+<style>
+  .counties { margin-top: 3rem; }
+  .counties h2 { margin-bottom: 0.75rem; }
+  .counties ul { list-style: none; padding: 0; margin: 0; columns: 14rem; column-gap: 1.5rem; }
+  .counties li { break-inside: avoid; padding: 0.3rem 0; border-bottom: 1px solid var(--rule); }
+</style>

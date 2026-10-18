@@ -1,0 +1,70 @@
+---
+// Página de condado: medidores del condado, alertas NWS vigentes y ríos. /<estado>/<condado>-county/
+import Base from '../../../layouts/Base.astro';
+import AreaPage from '../../../components/AreaPage.astro';
+import { getCountyPage } from '../../../lib/queries.ts';
+import { fmtTime, ianaZone } from '../../../lib/format.ts';
+import { siteOrigin } from '../../../lib/site.ts';
+
+const data = await getCountyPage(Astro.params.state!, Astro.params.county!);
+if (!data) return new Response(null, { status: 404 });
+const { state, county, gauges, alerts, alertsCheckedAt } = data;
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const name = `${county.county_name} County`;
+const path = `/${state.slug}/${county.slug}/`;
+const origin = siteOrigin(Astro.url.origin);
+const flooding = gauges.filter((g) => ['minor', 'moderate', 'major'].includes(g.status));
+const rivers = [...new Map(gauges.filter((g) => g.river_slug).map((g) => [g.river_slug, { name: g.river_name!, slug: g.river_slug! }])).values()];
+const tz = ianaZone(null, state.code);
+const alertsFresh = alertsCheckedAt && Date.now() - alertsCheckedAt.getTime() < 45 * 60_000;
+const verdict = alerts.length
+  ? `${alerts.length} active NWS flood alert${alerts.length === 1 ? '' : 's'} for ${name}.`
+  : flooding.length
+    ? `${flooding.length} gauge${flooding.length === 1 ? ' is' : 's are'} above flood stage in ${name}.`
+    : `No river gauge in ${name} is above flood stage right now.`;
+const title = `${name}, ${state.code} Flooding & River Levels Today`;
+const description = `${verdict} Live levels at ${gauges.length} river gauge${gauges.length === 1 ? '' : 's'}${rivers.length ? ` on the ${rivers.slice(0, 3).map((r) => r.name).join(', ')}` : ''}, NWS flood alerts and what floods at each level.`;
+const jsonLd = [
+  { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
+    { '@type': 'ListItem', position: 1, name: state.name, item: `${origin}/${state.slug}/` },
+    { '@type': 'ListItem', position: 2, name, item: origin + path },
+  ] },
+  { '@context': 'https://schema.org', '@type': 'Dataset', name: `${name}, ${state.name}: river levels and flood alerts`, url: origin + path, isAccessibleForFree: true,
+    description: `Current stage and NWS flood category for ${gauges.length} river gauges in ${name}, ${state.name}, plus active NWS flood alerts.`,
+    spatialCoverage: { '@type': 'AdministrativeArea', name: `${name}, ${state.name}` },
+    creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey' }, { '@type': 'Organization', name: 'NOAA National Weather Service' }] },
+];
+---
+<Base title={title} description={description} canonicalPath={path} jsonLd={jsonLd}>
+  <ol class="crumbs" slot="crumbs"><li><a href={`/${state.slug}/`}>{state.name}</a></li><li><a href={path}>{name}</a></li></ol>
+  <AreaPage heading={`${name} flooding & river levels`} lede={`${verdict} Readings from ${gauges.length} river gauge${gauges.length === 1 ? '' : 's'} in ${name}, ${state.name}, colored by National Weather Service flood category.`} gauges={gauges} groupBy="river">
+    <section class="c-alerts" aria-labelledby="c-alerts-h">
+      <h2 id="c-alerts-h">Flood alerts for {name}</h2>
+      {!alertsFresh ? (
+        <p class="note">We couldn't confirm current alerts. Check <a href="https://www.weather.gov/">weather.gov</a>.</p>
+      ) : alerts.length ? alerts.map((a) => (
+        <article class="alert">
+          <p class="ev">{a.event}</p>
+          <p>{a.headline}</p>
+          {(a.ends_at ?? a.expires_at) && <p class="small muted">Until {fmtTime(a.ends_at ?? a.expires_at, tz, true)}</p>}
+          <details><summary>Full alert text</summary><pre>{a.description}</pre>{a.instruction && <pre>{a.instruction}</pre>}</details>
+        </article>
+      )) : (
+        <p class="note">No active NWS flood alerts for {name}. <span class="muted">Checked {fmtTime(alertsCheckedAt, tz)}.</span></p>
+      )}
+      {rivers.length > 0 && (
+        <p class="small rivers">Rivers in {name}: {rivers.map((r, i) => <>{i > 0 && ' · '}<a href={`/river/${r.slug}/`}>{r.name}</a></>)}</p>
+      )}
+      <p class="small muted">Not an emergency service. If you are in danger, call 911. Turn around, don't drown.</p>
+    </section>
+  </AreaPage>
+</Base>
+
+<style>
+  .c-alerts { margin-top: 2rem; display: grid; gap: 0.7rem; }
+  .note { padding: 0.75rem 1rem; border-left: 4px solid var(--rule); background: var(--card); border-radius: 0 6px 6px 0; }
+  .alert { background: var(--card); border: 2px solid var(--cat-moderate); border-radius: 6px; padding: 1rem; display: grid; gap: 0.35rem; }
+  .ev { font: 800 1.3rem/1 var(--display); text-transform: uppercase; color: #b00000; }
+  .alert pre { white-space: pre-wrap; font: inherit; font-size: 0.9rem; }
+  .alert summary { cursor: pointer; font-size: 0.9rem; }
+</style>

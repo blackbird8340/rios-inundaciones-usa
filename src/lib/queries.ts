@@ -1,4 +1,4 @@
-import { cleanName, legacySlugTarget } from './slug.ts';
+import { cleanName, legacySlugTarget, slugify } from './slug.ts';
 import { db } from './db.ts';
 
 export type GaugeRow = {
@@ -131,4 +131,48 @@ export async function gaugeRedirect(slug: string): Promise<string | null> {
   if (!target) return null;
   const [[row]] = await db().execute<any[]>('SELECT slug FROM gauges WHERE slug = ?', [target]);
   return row?.slug ?? null;
+}
+
+export const countySlug = (county: string) => `${slugify(county)}-county`;
+
+// Condados con medidores de un estado (para la página de estado y el sitemap).
+export async function listCounties(stateCode?: string) {
+  const [rows] = await db().execute<any[]>(
+    `SELECT g.state_code, s.slug state_slug, g.county_name, MIN(g.county_fips) county_fips, COUNT(*) n,
+            SUM(g.stage_ft IS NOT NULL AND g.status IN ('minor','moderate','major')) flooding
+     FROM gauges g JOIN states s ON s.code = g.state_code
+     WHERE g.county_name IS NOT NULL ${stateCode ? 'AND g.state_code = ?' : ''}
+     GROUP BY g.state_code, s.slug, g.county_name ORDER BY g.state_code, g.county_name`,
+    stateCode ? [stateCode] : [],
+  );
+  return (rows as any[]).map((r) => ({ ...r, n: Number(r.n), flooding: Number(r.flooding), slug: countySlug(r.county_name) })) as {
+    state_code: string; state_slug: string; county_name: string; county_fips: string | null; n: number; flooding: number; slug: string;
+  }[];
+}
+
+export async function getCountyPage(stateSlug: string, slug: string) {
+  if (!slug.endsWith('-county')) return null;
+  const [[state]] = await db().execute<any[]>('SELECT code, name, slug FROM states WHERE slug = ?', [stateSlug]);
+  if (!state) return null;
+  const county = (await listCounties(state.code)).find((c) => c.slug === slug);
+  if (!county) return null;
+  const [gauges, [alerts], [[alertsRun]]] = await Promise.all([
+    listHomeGauges('g.state_code = ? AND g.county_name = ?', [state.code, county.county_name]),
+    county.county_fips
+      ? db().execute<any[]>(
+          `SELECT a.id, a.event, a.headline, a.area_desc, a.expires_at, a.ends_at, a.description, a.instruction FROM alerts a
+           JOIN alert_counties ac ON ac.alert_id = a.id
+           WHERE ac.county_fips = ? AND (a.expires_at IS NULL OR a.expires_at > NOW()) ORDER BY a.sent_at DESC`,
+          [county.county_fips],
+        )
+      : Promise.resolve([[]] as any),
+    db().execute<any[]>("SELECT MAX(finished_at) t FROM ingest_runs WHERE job = 'alerts' AND ok"),
+  ]);
+  return {
+    state: state as { code: string; name: string; slug: string },
+    county,
+    gauges,
+    alerts: alerts as any[],
+    alertsCheckedAt: (alertsRun?.t as Date | null) ?? null,
+  };
 }
