@@ -1,0 +1,34 @@
+---
+// "¿Es mucho o poco para esta fecha?": caudal de hoy contra los percentiles USGS del mismo día del año.
+import type { FlowNormals } from '../lib/queries.ts';
+import { FLOW_CLASS, flowClass, flowPercentile } from '../lib/normals.ts';
+interface Props { flow: number | null | undefined; normals: FlowNormals | null; river: string }
+const { flow, normals, river } = Astro.props;
+const p = flow != null && normals ? flowPercentile(Number(flow), normals) : null;
+const cls = p != null ? flowClass(p) : null;
+const n = (v: number | null) => (v == null ? '—' : `${Math.round(v).toLocaleString('en-US')} cfs`);
+const [mm, dd] = (normals?.doy ?? '01-01').split('-').map(Number);
+const dateLabel = new Date(Date.UTC(2024, mm - 1, dd)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const pct = normals?.p50 && flow != null ? Math.round((Number(flow) / normals.p50) * 100) : null;
+---
+{cls && p != null && normals && (
+  <section class="fvn" aria-labelledby="fvn-h">
+    <h2 id="fvn-h">Is that a lot of water for {dateLabel}?</h2>
+    <p class="verdict"><span class="badge" style={`background:${FLOW_CLASS[cls].color}`}>{FLOW_CLASS[cls].label}</span> Flow is {n(Number(flow))}, {FLOW_CLASS[cls].plain}{pct != null ? ` (${pct}% of the median)` : ''}.</p>
+    <div class="bar" role="img" aria-label={`Flow percentile about ${Math.round(p)} out of 100 for ${dateLabel}`}>
+      <span style="flex:10;background:#b2182b"></span><span style="flex:15;background:#f4a582"></span><span style="flex:50;background:#4dac26"></span><span style="flex:15;background:#67a9cf"></span><span style="flex:5;background:#2166ac"></span><span style="flex:5;background:#053061"></span>
+      <i style={`left:${Math.min(98, Math.max(2, p))}%`}></i>
+    </div>
+    <div class="ends small muted"><span>Drier</span><span>Typical: {n(normals.p25)}–{n(normals.p75)}</span><span>Wetter</span></div>
+    <p class="small muted">Compared with {normals.years ? `${normals.years} years of` : 'the'} USGS daily records for {dateLabel} at this gauge. "Normal" flow says nothing about flood stage by itself; see the flood levels below. Source: USGS Water Data statistics (beta).</p>
+  </section>
+)}
+<style>
+  .fvn { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 2rem; display: grid; gap: 0.55rem; }
+  .verdict { font-weight: 600; }
+  .badge { display: inline-block; color: #fff; font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.35rem 0.55rem; border-radius: 99px; margin-right: 0.3rem; vertical-align: middle; }
+  .bar { position: relative; display: flex; height: 0.9rem; border-radius: 99px; overflow: visible; }
+  .bar span:first-child { border-radius: 99px 0 0 99px; } .bar span:nth-child(6) { border-radius: 0 99px 99px 0; }
+  .bar i { position: absolute; top: -0.35rem; width: 0.3rem; height: 1.6rem; margin-left: -0.15rem; background: var(--ink); border: 2px solid #fff; border-radius: 3px; }
+  .ends { display: flex; justify-content: space-between; gap: 0.5rem; }
+</style>

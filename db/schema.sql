@@ -144,3 +144,18 @@ CREATE TABLE IF NOT EXISTS cameras (
   fetched_at DATETIME NOT NULL,
   INDEX idx_cameras_usgs (usgs_id)
 );
+
+-- Percentiles de caudal por día del año (USGS Statistics API v0, beta). scripts/ingest/normals.ts
+CREATE TABLE IF NOT EXISTS flow_normals (
+  usgs_id VARCHAR(20) NOT NULL,
+  doy CHAR(5) NOT NULL,
+  p05 DOUBLE NULL, p10 DOUBLE NULL, p25 DOUBLE NULL, p50 DOUBLE NULL, p75 DOUBLE NULL, p90 DOUBLE NULL, p95 DOUBLE NULL,
+  years INT NULL,
+  PRIMARY KEY (usgs_id, doy)
+);
+
+CREATE TABLE IF NOT EXISTS flow_normals_sites (
+  usgs_id VARCHAR(20) PRIMARY KEY,
+  fetched_at DATETIME NOT NULL,
+  ok BOOLEAN NOT NULL
+);

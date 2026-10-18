@@ -16,7 +16,8 @@
     "ingest:alerts": "tsx --env-file-if-exists=.env scripts/ingest/alerts.ts",
     "ingest:forecasts": "tsx --env-file-if-exists=.env scripts/ingest/forecasts.ts",
     "ingest:classify": "tsx --env-file-if-exists=.env scripts/ingest/classify.ts",
-    "ingest:cameras": "tsx --env-file-if-exists=.env scripts/ingest/cameras.ts"
+    "ingest:cameras": "tsx --env-file-if-exists=.env scripts/ingest/cameras.ts",
+    "ingest:normals": "tsx --env-file-if-exists=.env scripts/ingest/normals.ts"
   },
   "dependencies": {
     "@astrojs/node": "^11.1.7",

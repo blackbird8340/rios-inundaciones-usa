@@ -4,6 +4,7 @@ import FloodLadder from '../../components/FloodLadder.astro';
 import StageChart from '../../components/StageChart.astro';
 import ShareButton from '../../components/ShareButton.astro';
 import Webcam from '../../components/Webcam.astro';
+import FlowVsNormal from '../../components/FlowVsNormal.astro';
 import { forecastSentence } from '../../lib/insights.ts';
 import { countySlug, getGaugePage, gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
@@ -16,7 +17,7 @@ if (!data) {
   if (to) return Astro.redirect(`/gauge/${to}/`, 301);
   return new Response(null, { status: 404 });
 }
-const { gauge: g, impacts, crests, observations, forecast, alerts, alertsCheckedAt, upstream, downstream, lastObservation, camera } = data;
+const { gauge: g, impacts, crests, observations, forecast, alerts, alertsCheckedAt, upstream, downstream, lastObservation, camera, normals } = data;
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 
@@ -132,6 +133,8 @@ const jsonLd = [
     <ShareButton url={origin + path} text={shareText} />
   </section>
 
+
+  <FlowVsNormal flow={g.flow_cfs ?? lastObservation?.flow_cfs} normals={normals} river={river} />
 
   {camera && <Webcam camera={camera} alt={`Latest USGS camera photo of the ${g.name}`} />}
 

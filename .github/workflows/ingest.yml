@@ -36,7 +36,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Metadata + classify (daily)
         if: github.event.schedule == '17 9 * * *' || inputs.full
-        run: npm run db:schema && npm run ingest:meta && npm run ingest:classify && (npm run ingest:cameras || echo 'cameras failed')
+        run: npm run db:schema && npm run ingest:meta && npm run ingest:classify && (npm run ingest:cameras || echo 'cameras failed') && (npm run ingest:normals || echo 'normals failed')
       - run: npm run ingest:levels
       - run: npm run ingest:alerts
       - run: npm run ingest:forecasts
