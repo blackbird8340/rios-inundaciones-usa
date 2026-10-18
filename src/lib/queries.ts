@@ -216,3 +216,21 @@ export async function flowNormalsFor(usgsId: string | null, tz: string | null): 
     return null; // tabla todavía sin crear: no rompe la página
   }
 }
+
+// Alertas de crecida activas con condados (página /alerts/ y /alerts.geojson).
+export async function listActiveAlerts(withShapes = false) {
+  const [rows] = await db().execute<any[]>(
+    `SELECT a.id, a.event, a.severity, a.headline, a.area_desc, a.sender_name, a.sent_at, a.expires_at, a.ends_at, a.description, a.instruction
+            ${withShapes ? ', sh.geojson' : ''}
+     FROM alerts a ${withShapes ? 'LEFT JOIN alert_shapes sh ON sh.alert_id = a.id' : ''}
+     WHERE a.expires_at IS NULL OR a.expires_at > NOW() ORDER BY FIELD(a.severity, 'Extreme', 'Severe', 'Moderate', 'Minor') DESC, a.sent_at DESC`,
+  );
+  const [links] = await db().execute<any[]>(
+    `SELECT DISTINCT ac.alert_id, g.county_name, s.slug state_slug, g.state_code FROM alert_counties ac
+     JOIN gauges g ON g.county_fips = ac.county_fips JOIN states s ON s.code = g.state_code WHERE g.county_name IS NOT NULL`,
+  );
+  return (rows as any[]).map((a) => ({
+    ...a,
+    counties: (links as any[]).filter((l) => l.alert_id === a.id).map((l) => ({ name: `${l.county_name} County, ${l.state_code}`, href: `/${l.state_slug}/${countySlug(l.county_name)}/` })),
+  }));
+}

@@ -1,0 +1,41 @@
+---
+import Base from '../layouts/Base.astro';
+import { listActiveAlerts } from '../lib/queries.ts';
+import { fmtTime } from '../lib/format.ts';
+const alerts = await listActiveAlerts();
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+const tz = 'America/New_York';
+const warnings = alerts.filter((a) => /warning/i.test(a.event)).length;
+const lede = alerts.length
+  ? `${alerts.length} active National Weather Service flood alert${alerts.length === 1 ? '' : 's'}${warnings ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}, in the areas we cover.`
+  : 'No active National Weather Service flood alerts in the areas we cover right now.';
+---
+<Base title="Flood Warnings & Watches Now – Active NWS Flood Alerts" description={lede} canonicalPath="/alerts/">
+  <ol class="crumbs" slot="crumbs"><li><a href="/alerts/">Flood alerts</a></li></ol>
+  <h1 class="h">Flood alerts now</h1>
+  <p class="lede">{lede} <span class="muted">Warning = flooding is happening or about to. Watch = flooding is possible, be ready. Advisory = minor flooding, use caution.</span></p>
+  <div class="list">
+    {alerts.map((a) => (
+      <article class:list={['alert', { warn: /warning/i.test(a.event) }]}>
+        <p class="ev">{a.event}</p>
+        <p class="hl">{a.headline}</p>
+        <p class="small muted">{a.sender_name}{(a.ends_at ?? a.expires_at) && <> · until {fmtTime(a.ends_at ?? a.expires_at, tz, true)}</>}</p>
+        {a.counties.length > 0 && <p class="small">Counties: {a.counties.map((c: any, i: number) => <>{i > 0 && ', '}<a href={c.href}>{c.name}</a></>)}</p>}
+        <details><summary>Full alert text</summary><pre>{a.description}</pre>{a.instruction && <pre>{a.instruction}</pre>}</details>
+      </article>
+    ))}
+  </div>
+  <p class="small muted">Source: NOAA National Weather Service (api.weather.gov), refreshed every 30 minutes. Always follow official instructions; if you are in danger call 911. Turn around, don't drown.</p>
+</Base>
+<style>
+  .h { font: 800 clamp(2.2rem, 7vw, 3.6rem)/0.95 var(--display); text-transform: uppercase; margin-top: 1.5rem; }
+  .lede { margin: 0.7rem 0 1.5rem; max-width: 46rem; }
+  .list { display: grid; gap: 0.8rem; margin-bottom: 1.5rem; }
+  .alert { background: var(--card); border: 1px solid var(--rule); border-left: 6px solid #2e8b57; border-radius: 6px; padding: 1rem; display: grid; gap: 0.35rem; }
+  .alert.warn { border-left-color: #00a000; border-color: var(--cat-moderate); }
+  .ev { font: 800 1.3rem/1 var(--display); text-transform: uppercase; }
+  .warn .ev { color: #b00000; }
+  .hl { font-weight: 600; }
+  .alert pre { white-space: pre-wrap; font: inherit; font-size: 0.9rem; }
+  .alert summary { cursor: pointer; font-size: 0.9rem; }
+</style>

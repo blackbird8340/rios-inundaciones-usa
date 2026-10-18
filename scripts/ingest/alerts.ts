@@ -7,13 +7,52 @@ import { runJob, selectedStates } from '../lib/run.ts';
 
 const FLOOD_EVENT = /flood|hydrologic/i;
 
+type Geometry = { type: string; coordinates: any } | null;
 type Alert = {
+  geometry: Geometry;
   properties: {
+    affectedZones?: string[];
     id: string; event: string; severity: string; headline: string | null; description: string | null;
     instruction: string | null; areaDesc: string; senderName: string; sent: string; onset: string | null;
     expires: string | null; ends: string | null; geocode: { SAME?: string[] };
   };
 };
+
+// Redondea a 2 decimales (~1 km, alcanza para el mapa) y saca puntos repetidos para achicar el GeoJSON.
+const r2 = (n: number) => Math.round(n * 100) / 100;
+const ring = (pts: number[][]) => {
+  const out: number[][] = [];
+  for (const p of pts) { const q = [r2(p[0]), r2(p[1])]; const l = out[out.length - 1]; if (!l || l[0] !== q[0] || l[1] !== q[1]) out.push(q); }
+  return out.length >= 4 ? out : null;
+};
+const round = (c: any): any => (typeof c[0][0] === 'number' ? ring(c) : c.map(round).filter((x: any) => x && x.length));
+const polys = (g: Geometry): any[] => (!g ? [] : g.type === 'Polygon' ? [round(g.coordinates)] : g.type === 'MultiPolygon' ? round(g.coordinates) : []);
+
+async function zoneGeometry(url: string): Promise<Geometry> {
+  const [[row]] = await db().execute<any[]>('SELECT geojson FROM nws_zones WHERE zone_url = ? AND fetched_at > NOW() - INTERVAL 30 DAY', [url]);
+  if (row) return row.geojson ? JSON.parse(row.geojson) : null;
+  let geom: Geometry = null;
+  try {
+    geom = (await fetchJson<{ geometry: Geometry }>(url, { headers: { Accept: 'application/geo+json' }, retries: 1 })).geometry;
+  } catch (err) {
+    console.error(`zone ${url} failed`, String(err));
+    return null; // sin cachear el error: se reintenta en la próxima corrida
+  }
+  const slim = geom ? { type: 'MultiPolygon', coordinates: polys(geom) } : null;
+  await db().execute('REPLACE INTO nws_zones (zone_url, geojson, fetched_at) VALUES (?, ?, NOW())', [url, slim ? JSON.stringify(slim) : null]);
+  return slim;
+}
+
+async function alertShape(f: Alert): Promise<string | null> {
+  let parts = polys(f.geometry);
+  if (!parts.length) {
+    for (const z of (f.properties.affectedZones ?? []).slice(0, 60)) {
+      if (!z.startsWith(NWS_API_BASE + '/zones/')) continue;
+      parts = parts.concat(polys(await zoneGeometry(z)));
+    }
+  }
+  return parts.length ? JSON.stringify({ type: 'MultiPolygon', coordinates: parts }) : null;
+}
 
 runJob('alerts', async () => {
   const seen = new Set<string>();
@@ -32,7 +71,8 @@ runJob('alerts', async () => {
       allOk = false;
       continue;
     }
-    for (const { properties: a } of features) {
+    for (const feature of features) {
+      const a = feature.properties;
       if (!FLOOD_EVENT.test(a.event)) continue;
       seen.add(a.id);
       const d = (s: string | null) => (s ? new Date(s) : null);
@@ -46,6 +86,12 @@ runJob('alerts', async () => {
       // SAME = "0" + FIPS de estado (2) + condado (3)
       const fips = (a.geocode?.SAME ?? []).map((s) => s.slice(-5));
       if (fips.length) await withDeadlockRetry(() => db().query('INSERT IGNORE INTO alert_counties (alert_id, county_fips) VALUES ?', [fips.map((f) => [a.id, f])]));
+      try {
+        const shape = await alertShape(feature);
+        if (shape) await withDeadlockRetry(() => db().execute('REPLACE INTO alert_shapes (alert_id, geojson) VALUES (?, ?)', [a.id, shape]));
+      } catch (err) {
+        console.error(`shape failed for ${a.id}`, String(err)); // la forma es opcional: no tumba la ingesta
+      }
     }
   }
 
