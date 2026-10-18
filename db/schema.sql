@@ -132,3 +132,15 @@ CREATE TABLE IF NOT EXISTS ingest_runs (
   message TEXT NULL,
   INDEX idx_runs_job (job, started_at)
 );
+
+-- Webcams USGS HIVIS (NIMS) ligadas a un sitio USGS. Lo refresca scripts/ingest/cameras.ts una vez por día.
+CREATE TABLE IF NOT EXISTS cameras (
+  cam_id VARCHAR(120) PRIMARY KEY,
+  usgs_id VARCHAR(20) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  state_code CHAR(2) NULL,
+  small_dir VARCHAR(255) NOT NULL,
+  newest_at DATETIME NULL,
+  fetched_at DATETIME NOT NULL,
+  INDEX idx_cameras_usgs (usgs_id)
+);
