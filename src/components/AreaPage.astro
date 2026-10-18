@@ -30,6 +30,8 @@ const latest = gauges.reduce<Date | null>((m, g) => (g.observed_at && (!m || g.o
   {latest && <p class="small muted">Latest reading {ago(latest)}.</p>}
 </section>
 
+<slot />
+
 <section class="block">
   <h2>Gauges to watch now</h2>
   {alerts.length ? <GaugeCards gauges={alerts} /> : <p class="calm">All normal right now. No gauge here is at action stage or above.</p>}
