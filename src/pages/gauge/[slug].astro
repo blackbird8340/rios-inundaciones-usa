@@ -2,6 +2,9 @@
 import Base from '../../layouts/Base.astro';
 import FloodLadder from '../../components/FloodLadder.astro';
 import StageChart from '../../components/StageChart.astro';
+import ImpactSlider from '../../components/ImpactSlider.astro';
+import ShareButton from '../../components/ShareButton.astro';
+import { forecastSentence } from '../../lib/insights.ts';
 import { getGaugePage } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
 import { ago, cfs, fmtDate, fmtTime, ft, ianaZone } from '../../lib/format.ts';
@@ -13,7 +16,7 @@ const { gauge: g, impacts, crests, observations, forecast, alerts, alertsChecked
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 
-const tz = ianaZone(g.time_zone);
+const tz = ianaZone(g.time_zone, g.state_code);
 const cats = { action_ft: g.action_ft, minor_ft: g.minor_ft, moderate_ft: g.moderate_ft, major_ft: g.major_ft };
 // gauges.stage_ft queda en null si el último dato tiene más de un día; ahí mostramos el último que haya.
 const stage: number | null = g.stage_ft ?? lastObservation?.stage_ft ?? null;
@@ -22,7 +25,6 @@ const status = (g.stage_ft != null ? g.status : 'no_data') as FloodStatus;
 const minutesOld = observedAt ? (Date.now() - observedAt.getTime()) / 60_000 : Infinity;
 const stale = minutesOld > STALE_AFTER_MIN;
 const record = crests[0] ?? null;
-const placeLabel = `${g.place_name ?? g.name}, ${g.state_code}`;
 const river = g.river_name ?? g.name;
 
 // Respuesta directa en una línea: dónde está el río respecto de la próxima categoría.
@@ -48,6 +50,14 @@ const nwsUrl = g.lid ? `https://water.noaa.gov/gauges/${g.lid.toLowerCase()}` : 
 const usgsUrl = g.usgs_id ? `https://waterdata.usgs.gov/monitoring-location/${g.usgs_id}/` : null;
 const vsRecord = stage != null && record ? record.stage_ft - stage : null;
 
+const forecastText = forecastSentence(stage, observedAt, forecast, cats, tz);
+const recordText = vsRecord != null && record
+  ? vsRecord >= 0
+    ? `${vsRecord.toFixed(1)} ft below the record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
+    : `${(-vsRecord).toFixed(1)} ft above the previous record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
+  : null;
+const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
+const shareText = stage != null ? `${g.name}, ${g.state_code}: ${ft(stage, 1)} (${STATUS_META[status].label.toLowerCase()})` : `${g.name}, ${g.state_code} river level`;
 const title = `${g.name}, ${g.state_code} River Level Today – Flood Stage & Forecast`;
 const description = stage != null
   ? `${g.name} is at ${ft(stage, 1)} (${STATUS_META[status].label.toLowerCase()}). Live level, 7-day chart, NWS forecast, flood stages and what floods at each level.`
@@ -64,7 +74,7 @@ const jsonLd = [{
   itemListElement: crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: c.href })),
 }];
 ---
-<Base title={title} description={description} canonicalPath={path} jsonLd={jsonLd} noindex={minutesOld > 30 * 1440}>
+<Base title={title} description={description} canonicalPath={path} jsonLd={jsonLd} noindex={minutesOld > 30 * 1440} ogImage={`/og/${g.slug}.png`}>
   <ol class="crumbs" slot="crumbs">
     {crumbs.map((c) => <li><a href={c.href}>{c.name}</a></li>)}
   </ol>
@@ -73,6 +83,8 @@ const jsonLd = [{
     <p class="eyebrow">River level · {g.county_name ? `${g.county_name} County, ` : ''}{g.state_name}</p>
     <h1>{g.name}</h1>
     <p class="answer">{answerText}</p>
+    {forecastText && <p class="fc-line"><strong>NWS forecast:</strong> {forecastText}</p>}
+    {recordText && <p class="rec-line muted">{recordText}</p>}
     <p class="status-line">
       <span class:list={['pill', `pill--${status}`]}>{STATUS_META[status].label}</span>
       {observedAt && (
@@ -99,7 +111,12 @@ const jsonLd = [{
         <div><dt>Record crest</dt><dd>{ft(record.stage_ft)} <span class="muted small">{new Date(record.occurred_at).getUTCFullYear()}</span></dd></div>
       )}
     </dl>
+    <ShareButton url={origin + path} text={shareText} />
   </section>
+
+  <div class="slider-wrap">
+    <ImpactSlider categories={cats} impacts={impacts} stage={stage} record={record} heading="What floods at each level: try it" />
+  </div>
 
   <section class="alerts" aria-labelledby="alerts-h">
     <h2 id="alerts-h" class="visually-hidden">Flood alerts</h2>
@@ -137,7 +154,7 @@ const jsonLd = [{
     <aside class="side">
       <section aria-labelledby="chart-h">
         <h2 id="chart-h">Last 7 days{g.has_forecast ? ' and forecast' : ''}</h2>
-        <StageChart observations={observations} forecast={forecast} categories={cats} tz={tz} title={`${g.name} river level, last 7 days${g.has_forecast ? ' and NWS forecast' : ''}`} />
+        <StageChart observations={observations} forecast={forecast} categories={cats} tz={tz} title={`${g.name} river level, last 7 days${g.has_forecast ? ' and NWS forecast' : ''}`} record={record} />
         {fcIssued && <p class="small muted">Forecast issued {fmtTime(fcIssued, tz, true)} by NWS. Forecasts include expected rainfall and change as conditions develop.</p>}
       </section>
 
@@ -182,6 +199,9 @@ const jsonLd = [{
 </Base>
 
 <style>
+  .fc-line { margin-top: 0.6rem; font-size: 1.05rem; }
+  .rec-line { margin-top: 0.3rem; }
+  .slider-wrap { margin-block: 1.5rem; }
   .hero { padding-block: clamp(1.5rem, 5vw, 3rem) 1.5rem; }
   .eyebrow { font: 700 0.8rem/1.3 var(--body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
   h1 {

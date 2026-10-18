@@ -1,0 +1,44 @@
+# Ingesta programada (gratis con GitHub Actions). Vercel Hobby solo permite crons diarios.
+# Secrets necesarios (Settings → Secrets and variables → Actions):
+#   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, USGS_API_KEY
+name: ingest
+# El cron queda apagado hasta cargar los secrets (si no, falla cada 30 min y gasta minutos).
+# Para activarlo, descomentar el bloque schedule.
+on:
+  # schedule:
+  #   - cron: '7,37 * * * *'   # cada 30 min (GitHub puede demorar unos minutos)
+  #   - cron: '17 9 * * *'     # metadatos + clasificación, 1 vez por día
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run metadata + classify too'
+        type: boolean
+        default: false
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_SSL: 'true'
+      USGS_API_KEY: ${{ secrets.USGS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Metadata + classify (daily)
+        if: github.event.schedule == '17 9 * * *' || inputs.full
+        run: npm run db:schema && npm run ingest:meta && npm run ingest:classify
+      - run: npm run ingest:levels
+      - run: npm run ingest:alerts
+      - run: npm run ingest:forecasts

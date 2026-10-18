@@ -1,7 +1,7 @@
 // Diario: metadatos de medidores NWPS (categorías, impactos, crestas), condado (FIPS)
 // y backfill de 30 días de observado + pronóstico.
 // Uso: npm run ingest:meta [-- --state PA] [-- --lid PTTP1]
-import { db } from '../../src/lib/db.ts';
+import { db, withDeadlockRetry } from '../../src/lib/db.ts';
 import { fetchJson, usgsHeaders } from '../../src/lib/http.ts';
 import { STATES, USGS_OGC_BASE, type StateConfig } from '../../src/lib/config.ts';
 import { gaugeSlug, slugify, splitGaugeName } from '../../src/lib/slug.ts';
@@ -39,7 +39,7 @@ runJob('metadata', async () => {
       ids.push(id);
     });
     await fillMissingCountyFips(state);
-    await recomputeDerived(ids);
+    await withDeadlockRetry(() => recomputeDerived(ids));
     total += ids.length;
     failures.push(...errors.map((e) => `${e.item}: ${e.err instanceof Error ? e.err.message : e.err}`));
   }

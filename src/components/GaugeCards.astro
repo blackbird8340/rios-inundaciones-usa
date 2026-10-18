@@ -1,0 +1,74 @@
+---
+// Tarjetas de medidores en alerta (home y páginas de estado/río).
+import type { HomeGauge } from '../lib/queries.ts';
+import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
+import { ft } from '../lib/format.ts';
+interface Props { gauges: HomeGauge[] }
+const { gauges: alerts } = Astro.props;
+const st = (g: HomeGauge) => g.status as FloodStatus;
+function mini(g: HomeGauge) {
+  const top = Math.max(g.major_ft ?? 0, g.moderate_ft ?? 0, g.minor_ft ?? 0, g.action_ft ?? 0, g.stage_ft ?? 0) * 1.15 || 1;
+  const pct = (v: number | null) => (v == null ? null : Math.max(0, Math.min(100, (v / top) * 100)));
+  return {
+    fill: pct(g.stage_ft) ?? 0,
+    ticks: (['action', 'minor', 'moderate', 'major'] as const)
+      .map((k) => ({ k, v: g[`${k}_ft`] }))
+      .filter((t): t is { k: typeof t.k; v: number } => t.v != null)
+      .map((t) => ({ ...t, p: pct(t.v)! })),
+  };
+}
+const trendLabel: Record<string, string> = { rising: '▲ Rising', falling: '▼ Falling', steady: '■ Steady' };
+---
+      <ul class="cards">
+        {alerts.map((g) => {
+          const m = mini(g);
+          return (
+            <li class="card" style={`--cat: var(--cat-${st(g)})`}>
+              <a href={`/gauge/${g.slug}/`} class="card-link">
+                <span class="mini" aria-hidden="true">
+                  <span class="mini-fill" style={`height: ${m.fill}%`}></span>
+                  {m.ticks.map((t) => <span class="tick" style={`bottom: ${t.p}%; --tc: var(--cat-${t.k})`}></span>)}
+                </span>
+                <span class="card-body">
+                  <span class="pill">{STATUS_META[st(g)].label}</span>
+                  <span class="card-title">{g.river_name ?? g.name}</span>
+                  <span class="card-place">{g.place_name ?? g.name}, {g.state_code}</span>
+                  <span class="card-stage">{ft(g.stage_ft)}
+                    {g.trend && <span class:list={['trend', g.trend]}>{trendLabel[g.trend]}</span>}
+                  </span>
+                  <span class="card-meta">Flood stage {ft(g.minor_ft)}</span>
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+<style>
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 0.85rem; list-style: none; margin: 0; padding: 0; }
+  .card-link {
+    display: flex; gap: 0.9rem; height: 100%; padding: 0.9rem; text-decoration: none; color: var(--ink);
+    background: var(--card); border: 1px solid var(--rule); border-top: 6px solid var(--cat); border-radius: 6px;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .card-link:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgb(16 36 58 / 0.12); color: var(--ink); }
+  .mini {
+    position: relative; flex: none; width: 1.6rem; min-height: 7rem; border-radius: 4px; overflow: hidden;
+    background: repeating-linear-gradient(to top, var(--rule) 0 1px, transparent 1px 0.5rem), var(--water-tint);
+  }
+  .mini-fill { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#4a92b3, #1f5673); }
+  .mini-fill::before {
+    content: ''; position: absolute; top: -4px; left: 0; width: 200%; height: 6px;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='6' viewBox='0 0 26 6'%3E%3Cpath d='M0 3Q6.5 0 13 3T26 3V6H0Z' fill='%234a92b3'/%3E%3C/svg%3E") repeat-x;
+    animation: mini-drift 3s linear infinite;
+  }
+  @keyframes mini-drift { to { transform: translateX(-26px); } }
+  .tick { position: absolute; left: 0; right: 0; height: 3px; background: var(--tc); box-shadow: 0 0 0 1px rgb(16 36 58 / 0.35); }
+  .card-body { display: grid; gap: 0.15rem; align-content: start; min-width: 0; }
+  .pill { justify-self: start; font: 700 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.3rem 0.5rem; border-radius: 99px; background: var(--cat); color: var(--ink); margin-bottom: 0.3rem; }
+  .card-title { font: 700 1.3rem/1.05 var(--display); text-transform: uppercase; }
+  .card-place { color: var(--muted); font-size: 0.9rem; }
+  .card-stage { font: 800 1.9rem/1.1 var(--display); margin-top: 0.3rem; display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+  .trend { font: 600 0.8rem var(--body); color: var(--muted); }
+  .trend.rising { color: #b00020; }
+  .card-meta { font-size: 0.82rem; color: var(--muted); }
+</style>

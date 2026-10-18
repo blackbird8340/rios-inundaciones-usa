@@ -1,0 +1,81 @@
+---
+// Página de área (estado o río): resumen por categoría, tarjetas en alerta y lista de medidores agrupada.
+import GaugeCards from './GaugeCards.astro';
+import type { HomeGauge } from '../lib/queries.ts';
+import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
+import { ft, ago } from '../lib/format.ts';
+
+interface Props { heading: string; lede: string; gauges: HomeGauge[]; groupBy: 'river' | 'state' }
+const { heading, lede, gauges, groupBy } = Astro.props;
+const rank: Record<FloodStatus, number> = { major: 5, moderate: 4, minor: 3, action: 2, normal: 1, no_data: 0 };
+const st = (g: HomeGauge) => g.status as FloodStatus;
+const order: FloodStatus[] = ['major', 'moderate', 'minor', 'action', 'normal', 'no_data'];
+const counts = order.map((s) => [s, gauges.filter((g) => st(g) === s).length] as const).filter(([, n]) => n > 0);
+const alerts = gauges.filter((g) => rank[st(g)] >= 2).sort((a, b) => rank[st(b)] - rank[st(a)]);
+const groups = new Map<string, { href: string | null; list: HomeGauge[] }>();
+for (const g of gauges) {
+  const key = groupBy === 'river' ? (g.river_name ?? 'Other') : g.state_code;
+  if (!groups.has(key)) groups.set(key, { href: groupBy === 'river' && g.river_slug ? `/river/${g.river_slug}/` : null, list: [] });
+  groups.get(key)!.list.push(g);
+}
+const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+const latest = gauges.reduce<Date | null>((m, g) => (g.observed_at && (!m || g.observed_at > m) ? g.observed_at : m), null);
+---
+<section class="area-hero">
+  <h1>{heading}</h1>
+  <p class="lede">{lede}</p>
+  <ul class="chips">
+    {counts.map(([s, n]) => <li><span class="dot" style={`background: var(--cat-${s})`}></span><strong>{n}</strong> {STATUS_META[s].label.toLowerCase()}</li>)}
+  </ul>
+  {latest && <p class="small muted">Latest reading {ago(latest)}.</p>}
+</section>
+
+<section class="block">
+  <h2>Gauges to watch now</h2>
+  {alerts.length ? <GaugeCards gauges={alerts} /> : <p class="calm">All normal right now. No gauge here is at action stage or above.</p>}
+</section>
+
+<section class="block">
+  <h2>{groupBy === 'river' ? 'All gauges by river' : 'All gauges'}</h2>
+  <div class="groups">
+    {sorted.map(([name, grp]) => (
+      <details class="grp" open={sorted.length <= 12 || grp.list.some((g) => rank[st(g)] >= 2)}>
+        <summary>
+          {name} <span class="muted small">{grp.list.length} gauge{grp.list.length === 1 ? '' : 's'}</span>
+        </summary>
+        {grp.href && <a class="small rlink" href={grp.href}>{name} page →</a>}
+        <ul>
+          {grp.list.map((g) => (
+            <li>
+              <span class="dot" style={`background: var(--cat-${st(g)})`} title={STATUS_META[st(g)].label}></span>
+              <a href={`/gauge/${g.slug}/`}>{g.name}</a>
+              <span class="lvl">{ft(g.stage_ft)}</span>
+              <span class="sr">{STATUS_META[st(g)].label}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    ))}
+  </div>
+</section>
+
+<style>
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .area-hero { padding-block: clamp(1.5rem, 5vw, 3rem) 0.5rem; }
+  h1 { font: 800 clamp(2.4rem, 8vw, 4rem)/0.95 var(--display); text-transform: uppercase; }
+  .lede { margin-top: 0.75rem; color: var(--muted); font-size: 1.05rem; max-width: 44rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 1rem 0 0.5rem; padding: 0; font-size: 0.9rem; }
+  .chips li { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem; background: var(--card); border: 1px solid var(--rule); border-radius: 99px; }
+  .dot { display: inline-block; flex: none; width: 0.75rem; height: 0.75rem; border-radius: 50%; border: 1px solid rgb(0 0 0 / 0.25); }
+  .block { margin-top: clamp(2rem, 5vw, 3rem); }
+  .block > h2 { margin-bottom: 0.75rem; }
+  .calm { padding: 1rem 1.2rem; background: var(--card); border-left: 6px solid var(--cat-normal); border-radius: 6px; }
+  .groups { display: grid; gap: 0.5rem; }
+  .grp { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; }
+  .grp summary { cursor: pointer; padding: 0.75rem 1rem; font: 700 1.15rem/1.2 var(--display); text-transform: uppercase; }
+  .grp summary .small { font: 400 0.8rem var(--body); text-transform: none; margin-left: 0.4rem; }
+  .rlink { display: inline-block; margin: 0 1rem 0.4rem; }
+  .grp ul { list-style: none; margin: 0; padding: 0 0 0.4rem; }
+  .grp li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; padding: 0.45rem 1rem; border-top: 1px solid var(--rule); font-size: 0.92rem; }
+  .lvl { font: 800 1.05rem var(--display); }
+</style>

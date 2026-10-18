@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS gauges (
   forecast_crest_ft DECIMAL(8,2) NULL,
   forecast_crest_at DATETIME NULL,
   forecast_status ENUM('normal','action','minor','moderate','major','no_data') NOT NULL DEFAULT 'no_data',
+  -- river | reservoir (pool/lake) | tidal (estuary, sound, MLLW datum). Lo calcula scripts/ingest/classify.ts
+  gauge_type ENUM('river','reservoir','tidal') NOT NULL DEFAULT 'river',
+  gauge_type_source VARCHAR(40) NULL,
   metadata_updated_at DATETIME NULL,
   levels_updated_at DATETIME NULL,
   INDEX idx_gauges_state (state_code, status),

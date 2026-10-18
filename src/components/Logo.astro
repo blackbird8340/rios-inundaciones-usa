@@ -1,0 +1,26 @@
+---
+// Logo provisorio: marca (regla de medidor + ola) + wordmark. Para cambiar el nombre,
+// basta con SITE_NAME; la marca es independiente del texto.
+interface Props { name?: string }
+const { name = process.env.SITE_NAME || 'River Levels' } = Astro.props;
+---
+<span class="logo">
+  <svg class="mark" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true">
+    <rect width="32" height="32" rx="7" fill="#10243a" />
+    <clipPath id="logo-clip"><rect width="32" height="32" rx="7" /></clipPath>
+    <g clip-path="url(#logo-clip)">
+      <path d="M0 18 Q4 14.5 8 18 T16 18 T24 18 T32 18 V32 H0Z" fill="#2f6f8f" />
+      <path d="M0 22 Q4 19 8 22 T16 22 T24 22 T32 22 V32 H0Z" fill="#4a92b3" />
+    </g>
+    <g stroke="#eef2f3" stroke-linecap="round" stroke-width="1.6">
+      <path d="M8 6v20" /><path d="M8 7h5M8 12h3.5M8 17h5M8 22h3.5" />
+    </g>
+    <circle cx="23" cy="10" r="2.6" fill="#ff9900" />
+  </svg>
+  <span class="word">{name}</span>
+</span>
+<style>
+  .logo { display: inline-flex; align-items: center; gap: 0.55rem; }
+  .mark { flex: none; width: 2rem; height: 2rem; }
+  .word { font: 800 1.45rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+</style>

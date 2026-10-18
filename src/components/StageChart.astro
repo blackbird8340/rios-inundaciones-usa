@@ -8,8 +8,9 @@ interface Props {
   categories: Categories;
   tz: string;
   title: string;
+  record?: { stage_ft: number; occurred_at: Date } | null;
 }
-const { observations, forecast, categories, tz, title } = Astro.props;
+const { observations, forecast, categories, tz, title, record = null } = Astro.props;
 
 const W = 480, H = 280;
 const M = { top: 14, right: 86, bottom: 28, left: 36 };
@@ -33,6 +34,11 @@ const visibleCats = cats.filter((c) => {
   return v != null && (c.key === 'action_ft' || c.key === 'minor_ft' || v <= dataMax + 2);
 });
 let yMin = Math.min(...values), yMax = Math.max(ceiling, ...visibleCats.map((c) => categories[c.key]!));
+// Récord: se dibuja si no estira la escala más del 60 %; si no, nota debajo del gráfico.
+const recordV = record ? Number(record.stage_ft) : null;
+const recordYear = record ? new Date(record.occurred_at).getUTCFullYear() : null;
+const recordOnChart = recordV != null && recordV >= yMin && recordV - yMax <= (yMax - yMin) * 0.6;
+if (recordOnChart) yMax = Math.max(yMax, recordV!);
 const pad = Math.max((yMax - yMin) * 0.08, 0.5);
 yMin = Math.floor(yMin - pad);
 yMax = Math.ceil(yMax + pad);
@@ -84,6 +90,12 @@ const now = Date.now();
           <text x={M.left + iw + 20} y={y(categories[c.key]!) + 1} class="cat">{c.label} {categories[c.key]}</text>
         </g>
       ))}
+      {recordOnChart && (
+        <g>
+          <line x1={M.left} x2={M.left + iw} y1={y(recordV!)} y2={y(recordV!)} class="rec" />
+          <text x={M.left + iw + 6} y={y(recordV!) + 1} class="cat">Record {recordV}</text>
+        </g>
+      )}
       {now > t0 && now < t1 && (
         <g>
           <line x1={x(now)} x2={x(now)} y1={M.top} y2={M.top + ih} class="now" />
@@ -96,7 +108,11 @@ const now = Date.now();
     <figcaption class="legend small">
       <span><i class="key key-obs"></i>Observed (ft)</span>
       {fcPath && <span><i class="key key-fc"></i>NWS forecast</span>}
+      {recordOnChart && <span><i class="key key-rec"></i>Record crest ({recordYear})</span>}
     </figcaption>
+    {recordV != null && !recordOnChart && recordV > yMax && (
+      <p class="small muted note">The record crest ({recordV} ft, {recordYear}) is far above this chart's scale.</p>
+    )}
   </figure>
 ) : (
   <p class="muted">Not enough recent readings to draw a chart.</p>
@@ -113,5 +129,8 @@ const now = Date.now();
   .fc { fill: none; stroke: var(--water); stroke-width: 2.5; stroke-dasharray: 6 5; }
   .legend { display: flex; gap: 1.25rem; padding: 0.25rem 0.75rem; color: var(--muted); }
   .key { display: inline-block; width: 1.5rem; height: 0; border-top: 3px solid var(--water-deep); vertical-align: middle; margin-right: 0.4rem; }
+  .rec { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .key-rec { border-top: 2px dashed var(--ink); }
+  .note { padding: 0 0.75rem 0.25rem; }
   .key-fc { border-top: 3px dashed var(--water); }
 </style>

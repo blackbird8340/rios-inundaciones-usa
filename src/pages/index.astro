@@ -1,21 +1,397 @@
 ---
 import Base from '../layouts/Base.astro';
-import { listGauges } from '../lib/queries.ts';
+import { getHomeData, type HomeGauge } from '../lib/queries.ts';
 import { STATUS_META, type FloodStatus } from '../lib/flood.ts';
-import { ft } from '../lib/format.ts';
+import { ft, fmtDate, ago } from '../lib/format.ts';
+import GaugeCards from '../components/GaugeCards.astro';
+import ImpactSlider from '../components/ImpactSlider.astro';
+import RisingList from '../components/RisingList.astro';
+import { getRisingFastest, getImpactSliderData } from '../lib/insights.ts';
 
-const gauges = await listGauges();
+const [{ gauges, records, states }, rising, featured] = await Promise.all([
+  getHomeData(), getRisingFastest(5), getImpactSliderData('ohio-river-at-pittsburgh-pttp1'),
+]);
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+
+const st = (g: HomeGauge) => g.status as FloodStatus;
+const count = (s: FloodStatus) => gauges.filter((g) => st(g) === s).length;
+const counts = {
+  major: count('major'), moderate: count('moderate'), minor: count('minor'),
+  action: count('action'), normal: count('normal'), no_data: count('no_data'),
+};
+const flooding = counts.major + counts.moderate + counts.minor;
+const rank: Record<FloodStatus, number> = { major: 5, moderate: 4, minor: 3, action: 2, normal: 1, no_data: 0 };
+const worst = (Object.keys(rank) as FloodStatus[]).sort((a, b) => rank[b] - rank[a]).find((s) => counts[s] > 0 && s !== 'no_data') ?? 'normal';
+// Nivel del agua de fondo según la peor categoría activa hoy (decorativo, no es un dato).
+// 0 = día normal, 4 = hay inundación mayor: sube la superficie hasta 4 rem.
+const waterLevel = { major: 4, moderate: 3, minor: 2, action: 1, normal: 0, no_data: 0 }[worst];
+
+const alerts = gauges
+  .filter((g) => rank[st(g)] >= 2)
+  .sort((a, b) => rank[st(b)] - rank[st(a)] || (b.stage_ft! - (b.minor_ft ?? b.action_ft ?? 0)) - (a.stage_ft! - (a.minor_ft ?? a.action_ft ?? 0)));
+
+// Mini medidor: escala de 0 a la categoría más alta conocida (+15 %), clamp 0–100 %.
+
+const stateCards = states.map((s) => {
+  const list = gauges.filter((g) => g.state_code === s.code);
+  return {
+    ...s,
+    total: list.length,
+    flooding: list.filter((g) => rank[st(g)] >= 3).length,
+    action: list.filter((g) => st(g) === 'action').length,
+  };
+}).filter((s) => s.total > 0);
+
+const latest = gauges.reduce<Date | null>((m, g) => (g.observed_at && (!m || g.observed_at > m) ? g.observed_at : m), null);
+const segments = ([
+  ['major', counts.major], ['moderate', counts.moderate], ['minor', counts.minor],
+  ['action', counts.action], ['normal', counts.normal], ['no_data', counts.no_data],
+] as [FloodStatus, number][]);
+const stateNames = stateCards.map((s) => s.name).join(' and ');
+const jsonLd = [{ '@context': 'https://schema.org', '@type': 'WebSite', name: process.env.SITE_NAME || 'River Levels', url: '/' }];
 ---
-<Base title="River levels and flood stages" description="Current river levels, flood stages and NWS forecasts." canonicalPath="/">
-  <h1 class="h">River gauges</h1>
-  <ul class="list">
-    {gauges.map((g) => (
-      <li><a href={`/gauge/${g.slug}/`}>{g.name}, {g.state_code}</a> <span class="muted">{ft(g.stage_ft)} · {STATUS_META[g.status as FloodStatus].label}</span></li>
-    ))}
-  </ul>
+<Base
+  title="Is your river flooding? Live river levels and flood stages"
+  description={`Live river levels for ${gauges.length} gauges in ${stateNames}: which rivers are flooding now, flood stages, record crests and NWS forecasts.`}
+  canonicalPath="/"
+  jsonLd={jsonLd}
+>
+  <section class="hero" style={`--lift: ${waterLevel}rem; --worst: var(--cat-${worst})`}>
+    <div class="hero-inner">
+      <h1>Is your river flooding?</h1>
+      <p class="lede">Live levels from {gauges.length.toLocaleString('en-US')} river gauges in {stateNames}. Search a town, river or gauge.</p>
+      <form class="search" role="search" action="#" id="search-form">
+        <label for="q" class="sr">Search by town, river, county or gauge</label>
+        <input id="q" type="search" autocomplete="off" placeholder="Town, river, county or gauge…" aria-controls="results" aria-describedby="search-hint" />
+        <button type="button" id="locate" class="locate">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 3h-2.07A7 7 0 0 0 13 5.07V3h-2v2.07A7 7 0 0 0 5.07 11H3v2h2.07A7 7 0 0 0 11 18.93V21h2v-2.07A7 7 0 0 0 18.93 13H21v-2Zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10Z"/></svg>
+          Use my location
+        </button>
+      </form>
+      <p id="search-hint" class="hint" aria-live="polite"></p>
+      <ul id="results" class="results" hidden></ul>
+    </div>
+
+    <div class="today" aria-labelledby="today-h">
+      <h2 id="today-h" class="sr">Today at a glance</h2>
+      <p class="today-line">
+        {flooding > 0
+          ? <><strong>{flooding} {flooding === 1 ? 'gauge' : 'gauges'} flooding</strong>, {counts.action} at action stage.</>
+          : counts.action > 0
+            ? <><strong>No flooding right now.</strong> {counts.action} {counts.action === 1 ? 'gauge is' : 'gauges are'} at action stage.</>
+            : <><strong>All rivers normal right now.</strong></>}
+      </p>
+      <ul class="chips">
+        {segments.filter(([, n]) => n > 0).map(([s, n]) => (
+          <li><span class="dot" style={`background: var(--cat-${s})`} aria-hidden="true"></span><strong>{n}</strong> {STATUS_META[s].label.toLowerCase()}</li>
+        ))}
+      </ul>
+      {latest && <p class="updated">Latest reading {ago(latest)}.</p>}
+      <div class="water" aria-hidden="true"></div>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="alerts-h">
+    <h2 id="alerts-h">Rivers to watch now</h2>
+    {alerts.length === 0 ? (
+      <p class="calm">All normal today. No gauge is at action stage or above.</p>
+    ) : (
+      <GaugeCards gauges={alerts} />
+    )}
+  </section>
+
+  <section class="block" aria-labelledby="rising-h">
+    <h2 id="rising-h">Rising fastest today</h2>
+    <p class="muted small">Largest rise in the last 24 hours. <a href="/rising/">See the full list</a>.</p>
+    <RisingList rows={rising} />
+  </section>
+
+  <section class="block" aria-labelledby="map-h">
+    <h2 id="map-h">Map of gauges</h2>
+    <p class="muted small">Each dot is a gauge, colored by its current NWS flood category. Flooding gauges pulse. Tap a dot for details.</p>
+    <div id="map" class="map" role="region" aria-label="Map of river gauges"><p class="map-loading">Loading map…</p></div>
+    <ul class="legend">
+      {(['normal', 'action', 'minor', 'moderate', 'major', 'no_data'] as FloodStatus[]).map((s) => (
+        <li><span class:list={['dot', { pulse: ['minor', 'moderate', 'major'].includes(s) }]} style={`background: var(--cat-${s}); --g: var(--cat-${s})`}></span>{STATUS_META[s].label}</li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="block" aria-labelledby="states-h">
+    <h2 id="states-h">Browse by state</h2>
+    <ul class="states">
+      {stateCards.map((s) => (
+        <li>
+          <a href={`/${s.slug}/`} class="state">
+            <span class="state-code" aria-hidden="true">{s.code}</span>
+            <span class="state-name">{s.name}</span>
+            <span class="state-stats">{s.total} gauges · <span class:list={{ hot: s.flooding > 0 }}>{s.flooding} flooding</span> · {s.action} action stage</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  {records.length > 0 && (
+    <section class="block" aria-labelledby="records-h">
+      <h2 id="records-h">Historic record crests</h2>
+      <p class="muted small">The highest crests on record, ranked by how far they rose above flood stage.</p>
+      <ol class="records">
+        {records.map((r) => (
+          <li>
+            <a href={`/gauge/${r.slug}/`}>{r.name}, {r.state_code}</a>
+            <span class="rec-num">{ft(r.stage_ft)}</span>
+            <span class="muted small">{fmtDate(r.occurred_at)} · {r.over_ft.toFixed(1)} ft above flood stage ({ft(r.minor_ft)})</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )}
+
+  {featured && (
+    <div class="block">
+      <ImpactSlider categories={featured.gauge} impacts={featured.impacts} stage={featured.gauge.stage_ft} record={featured.record}
+        heading="What floods at each level?" gaugeName={`${featured.gauge.name}, ${featured.gauge.state_code}`} gaugeHref={`/gauge/${featured.gauge.slug}/`} />
+    </div>
+  )}
+
+  <section class="block explain" aria-labelledby="how-h">
+    <h2 id="how-h">How to read river levels</h2>
+    <p>A river gauge measures the water height (the <em>stage</em>) in feet above a local reference point, not the depth of the river. Each gauge has its own thresholds set by the National Weather Service:</p>
+    <dl class="cats">
+      <div style="--cat: var(--cat-action)"><dt>Action stage</dt><dd>The river is nearing flood stage. Officials begin preparing.</dd></div>
+      <div style="--cat: var(--cat-minor)"><dt>Minor flooding</dt><dd>Flood stage. Little or no property damage, but some public threat, like flooded low roads.</dd></div>
+      <div style="--cat: var(--cat-moderate)"><dt>Moderate flooding</dt><dd>Some structures and roads near the river flood. Some evacuations possible.</dd></div>
+      <div style="--cat: var(--cat-major)"><dt>Major flooding</dt><dd>Extensive flooding of structures and roads. Significant evacuations possible.</dd></div>
+    </dl>
+    <p class="muted small">Each gauge page shows what floods at each level for that spot.</p>
+  </section>
 </Base>
+
+<script>
+  type Row = [string, string, string | null, string, string | null, string | null, number, number, string, number | null];
+  const COLORS: Record<string, string> = { normal: '#00c853', action: '#e6c800', minor: '#ff9900', moderate: '#ff0000', major: '#cc33ff', no_data: '#9e9e9e' };
+  const LABELS: Record<string, string> = { normal: 'Normal', action: 'Action stage', minor: 'Minor flooding', moderate: 'Moderate flooding', major: 'Major flooding', no_data: 'No recent data' };
+
+  let index: Promise<Row[]> | null = null;
+  const load = (): Promise<Row[]> => (index ??= fetch('/gauges.json').then((r) => r.json() as Promise<Row[]>));
+
+  const input = document.getElementById('q') as HTMLInputElement;
+  const results = document.getElementById('results') as HTMLUListElement;
+  const hint = document.getElementById('search-hint') as HTMLParagraphElement;
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const fmt = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)} ft`);
+
+  function render(rows: { r: Row; extra?: string }[], msg: string) {
+    hint.textContent = msg;
+    results.hidden = rows.length === 0;
+    results.innerHTML = rows.map(({ r, extra }) => `
+      <li><a href="/gauge/${r[0]}/"><span class="r-dot" style="background:${COLORS[r[8]]}"></span>
+      <span><strong>${esc(r[1])}</strong>, ${r[3]}<br><small>${LABELS[r[8]]} · ${fmt(r[9])}${extra ? ' · ' + extra : ''}</small></span></a></li>`).join('');
+  }
+
+  const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9 ]/g, ' ');
+  input.addEventListener('focus', load, { once: true });
+  input.addEventListener('input', async () => {
+    const q = norm(input.value).trim();
+    if (q.length < 2) return render([], '');
+    const terms = q.split(/\s+/);
+    const rows = await load();
+    const hits = rows.filter((r) => {
+      const hay = norm([r[1], r[2], r[4], r[5] ? r[5] + ' county' : '', r[3]].join(' '));
+      return terms.every((t) => hay.includes(t));
+    }).slice(0, 12);
+    render(hits.map((r) => ({ r })), hits.length ? `${hits.length === 12 ? 'Top 12' : hits.length} matches` : 'No gauges match. Try a river or county name.');
+  });
+  document.getElementById('search-form')!.addEventListener('submit', (e) => {
+    e.preventDefault();
+    (results.querySelector('a') as HTMLAnchorElement | null)?.click();
+  });
+
+  document.getElementById('locate')!.addEventListener('click', () => {
+    if (!navigator.geolocation) return render([], 'Your browser does not share location.');
+    hint.textContent = 'Finding gauges near you…';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude: la, longitude: lo } = pos.coords;
+      const rad = Math.PI / 180;
+      const miles = (r: Row) => {
+        const a = Math.sin(((r[6] - la) * rad) / 2) ** 2 + Math.cos(la * rad) * Math.cos(r[6] * rad) * Math.sin(((r[7] - lo) * rad) / 2) ** 2;
+        return 3958.8 * 2 * Math.asin(Math.sqrt(a));
+      };
+      const near = (await load()).map((r) => ({ r, d: miles(r) })).sort((a, b) => a.d - b.d).slice(0, 8);
+      if (near[0].d > 150) return render([], 'We do not cover your area yet. Coverage today: ' + document.querySelector('.lede')!.textContent);
+      render(near.map(({ r, d }) => ({ r, extra: `${d.toFixed(1)} mi away` })), 'Nearest gauges to you');
+    }, () => render([], 'Location not available. Search by town or river instead.'), { timeout: 10000 });
+  });
+
+  // Mapa: MapLibre + OpenFreeMap (Positron). Se carga recién cuando se acerca a la pantalla.
+  const mapEl = document.getElementById('map')!;
+  new IntersectionObserver(async (entries, obs) => {
+    if (!entries.some((e) => e.isIntersecting)) return;
+    obs.disconnect();
+    const lib = '/vendor/maplibre/maplibre-gl.mjs';
+    const [maplibregl, rows] = (await Promise.all([import(/* @vite-ignore */ new URL(lib, location.href).href), load(), import('maplibre-gl/dist/maplibre-gl.css')])) as [typeof import('maplibre-gl'), Row[], unknown];
+    mapEl.innerHTML = '';
+    const order: Record<string, number> = { no_data: 0, normal: 1, action: 2, minor: 3, moderate: 4, major: 5 };
+    const data = {
+      type: 'FeatureCollection' as const,
+      features: rows.map((r) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [r[7], r[6]] },
+        properties: { slug: r[0], name: r[1], status: r[8], stage: r[9], rank: order[r[8]] },
+      })),
+    };
+    const lons = rows.map((r) => r[7]), lats = rows.map((r) => r[6]);
+    const map = new maplibregl.Map({
+      container: mapEl,
+      style: 'https://tiles.openfreemap.org/styles/positron',
+      bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      fitBoundsOptions: { padding: 24 },
+      cooperativeGestures: true,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const color: any = ['match', ['get', 'status'], ...Object.entries(COLORS).flat(), '#9e9e9e'];
+    (mapEl as any).__map = map;
+    map.on('load', () => {
+      map.addSource('gauges', { type: 'geojson', data });
+      // Halo pulsante solo para inundación.
+      map.addLayer({ id: 'halo', type: 'circle', source: 'gauges', filter: ['>=', ['get', 'rank'], 3],
+        paint: { 'circle-color': color, 'circle-radius': 14, 'circle-opacity': 0.25, 'circle-blur': 0.6 } });
+      map.addLayer({ id: 'dots', type: 'circle', source: 'gauges', layout: { 'circle-sort-key': ['get', 'rank'] },
+        paint: {
+          'circle-color': color,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, ['match', ['get', 'rank'], 0, 2.5, 1, 3.5, 6], 10, ['match', ['get', 'rank'], 0, 5, 1, 6, 10]],
+          'circle-stroke-color': ['case', ['>=', ['get', 'rank'], 2], '#10243a', '#ffffff'],
+          'circle-stroke-width': ['case', ['>=', ['get', 'rank'], 2], 1.5, 1],
+          'circle-opacity': ['case', ['==', ['get', 'rank'], 0], 0.6, 0.95],
+        } });
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const t0 = performance.now();
+        const pulse = (t: number) => {
+          const k = ((t - t0) % 1800) / 1800;
+          map.setPaintProperty('halo', 'circle-radius', 8 + k * 16);
+          map.setPaintProperty('halo', 'circle-opacity', 0.45 * (1 - k));
+          requestAnimationFrame(pulse);
+        };
+        requestAnimationFrame(pulse);
+      }
+    });
+    map.on('mouseenter', 'dots', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'dots', () => (map.getCanvas().style.cursor = ''));
+    map.on('click', 'dots', (e: any) => {
+      const f = e.features![0];
+      const p = f.properties as { slug: string; name: string; status: string; stage: number | null | string };
+      const stage = p.stage == null || p.stage === 'null' ? null : Number(p.stage);
+      new maplibregl.Popup({ className: 'gpop', maxWidth: '260px', offset: 10 })
+        .setLngLat((f.geometry as any).coordinates)
+        .setHTML(`<span class="gpop-pill" style="--c:${COLORS[p.status]}">${LABELS[p.status]}</span>
+          <strong class="gpop-name">${esc(p.name)}</strong>
+          <span class="gpop-stage">${fmt(stage)}</span>
+          <a class="gpop-link" href="/gauge/${p.slug}/">View gauge →</a>`)
+        .addTo(map);
+    });
+  }, { rootMargin: '300px' }).observe(mapEl);
+</script>
+
 <style>
-  .h { font: 800 2.5rem/1 var(--display); text-transform: uppercase; margin: 2rem 0 1rem; }
-  .list { display: grid; gap: 0.5rem; padding-left: 1.2rem; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .hero {
+    position: relative;
+    overflow: hidden;
+    margin: 1rem calc(-1 * var(--gutter)) 0;
+    padding: clamp(2rem, 7vw, 4.5rem) var(--gutter) 0;
+    background: linear-gradient(#f7fafb, var(--paper));
+    border-radius: 0 0 10px 10px;
+    isolation: isolate;
+  }
+  .hero-inner { max-width: 40rem; position: relative; z-index: 2; }
+  h1 { font: 800 clamp(2.6rem, 9vw, 4.75rem)/0.95 var(--display); text-transform: uppercase; letter-spacing: 0.005em; }
+  .lede { margin-top: 0.9rem; font-size: 1.1rem; color: var(--muted); }
+
+  .search { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.4rem; }
+  .search input {
+    flex: 1 1 16rem; min-width: 0; font: inherit; font-size: 1.05rem;
+    padding: 0.85rem 1rem; border: 2px solid var(--ink); border-radius: 6px; background: var(--card); color: var(--ink);
+  }
+  .locate {
+    display: inline-flex; align-items: center; gap: 0.4rem; font: 600 0.95rem var(--body);
+    padding: 0.85rem 1rem; border: 2px solid var(--ink); border-radius: 6px; background: var(--ink); color: #fff; cursor: pointer;
+  }
+  .locate:hover { background: var(--water-deep); border-color: var(--water-deep); }
+  .hint { min-height: 1.4em; margin-top: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+  .results { list-style: none; margin: 0.25rem 0 0; padding: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; max-height: 22rem; overflow: auto; box-shadow: 0 8px 24px rgb(16 36 58 / 0.12); }
+  .results :global(li + li) { border-top: 1px solid var(--rule); }
+  .results :global(a) { display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.65rem 0.9rem; text-decoration: none; color: var(--ink); }
+  .results :global(a:hover) { background: var(--water-tint); }
+  .results :global(small) { color: var(--muted); }
+  .results :global(.r-dot) { flex: none; width: 0.75rem; height: 0.75rem; margin-top: 0.35rem; border-radius: 50%; border: 1px solid rgb(0 0 0 / 0.25); }
+
+  /* Resumen del día sobre el agua animada */
+  .today { position: relative; z-index: 2; margin-top: calc(clamp(2.5rem, 7vw, 4rem) + var(--lift, 0rem)); padding: 1.25rem 0 1.75rem; color: #fff; text-shadow: 0 1px 2px rgb(16 36 58 / 0.4); }
+  .today-line { font: 700 clamp(1.4rem, 4.5vw, 2rem)/1.15 var(--display); text-transform: uppercase; letter-spacing: 0.01em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; list-style: none; margin: 0.7rem 0 0; padding: 0; font-size: 0.95rem; }
+  .chips li { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .dot { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 1px solid rgb(0 0 0 / 0.25); }
+  .updated { margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.85; }
+
+  .water {
+    position: absolute; left: calc(-1 * var(--gutter)); right: calc(-1 * var(--gutter)); bottom: 0; top: calc(-0.5rem - var(--lift, 0rem)); z-index: -1;
+    background:
+      radial-gradient(ellipse 9rem 0.5rem at 22% 1.4rem, rgb(255 255 255 / 0.16), transparent 70%),
+      radial-gradient(ellipse 12rem 0.5rem at 70% 2.6rem, rgb(255 255 255 / 0.1), transparent 70%),
+      linear-gradient(to bottom, #4a92b3 0%, #33799b 45%, #1f5673 100%);
+  }
+  .water::before, .water::after { content: ''; position: absolute; left: 0; right: 0; background-repeat: repeat-x; pointer-events: none; }
+  .water::before {
+    top: -16px; height: 17px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='17' viewBox='0 0 320 17'%3E%3Cpath d='M0 9Q80 0 160 9T320 9V17H0Z' fill='%2378b3cf' fill-opacity='.6'/%3E%3C/svg%3E");
+    background-size: 320px 17px; animation: drift-back 13s linear infinite;
+  }
+  .water::after {
+    top: -11px; height: 12px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='12' viewBox='0 0 200 12'%3E%3Cpath d='M0 6Q50 0 100 6T200 6V12H0Z' fill='%234a92b3'/%3E%3Cpath d='M0 6Q50 0 100 6T200 6' fill='none' stroke='%23ffffff' stroke-opacity='.55' stroke-width='1.2'/%3E%3C/svg%3E");
+    background-size: 200px 12px; animation: drift-front 8s linear infinite;
+  }
+  @keyframes drift-front { to { background-position-x: 200px; } }
+  @keyframes drift-back { to { background-position-x: -320px; } }
+
+  .block { margin-top: clamp(2.5rem, 6vw, 3.5rem); }
+  .block > h2 { margin-bottom: 0.75rem; }
+  .calm { padding: 1rem 1.2rem; background: var(--card); border-left: 6px solid var(--cat-normal); border-radius: 6px; }
+
+
+  .map { height: clamp(22rem, 62vh, 34rem); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: #f2f3f0; box-shadow: 0 10px 30px rgb(16 36 58 / 0.08); }
+  .map :global(.gpop .maplibregl-popup-content) { font: 400 0.9rem/1.35 var(--body); color: var(--ink); padding: 0.8rem 0.95rem; border-radius: 10px; box-shadow: 0 10px 28px rgb(16 36 58 / 0.22); display: grid; gap: 0.25rem; }
+  .map :global(.gpop-pill) { justify-self: start; font: 700 0.68rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.05em; padding: 0.28rem 0.5rem; border-radius: 99px; background: var(--c); color: var(--ink); }
+  .map :global(.gpop-name) { font: 700 1.15rem/1.1 var(--display); text-transform: uppercase; padding-right: 1rem; }
+  .map :global(.gpop-stage) { font: 800 1.5rem/1 var(--display); }
+  .map :global(.gpop-link) { font-weight: 600; color: var(--water-deep); }
+  .map :global(.maplibregl-popup-close-button) { font-size: 1.2rem; padding: 0 0.4rem; color: var(--muted); }
+  .map-loading { padding: 1rem; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0.75rem 0 0; padding: 0; font-size: 0.82rem; }
+  .legend li { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.65rem; background: var(--card); border: 1px solid var(--rule); border-radius: 99px; }
+  .legend .dot.pulse { box-shadow: 0 0 6px 2px var(--g); }
+
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); gap: 0.85rem; list-style: none; margin: 0; padding: 0; }
+  .state { display: grid; grid-template-columns: auto 1fr; gap: 0 1rem; align-items: center; padding: 1rem 1.1rem; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; text-decoration: none; color: var(--ink); }
+  .state:hover { border-color: var(--water); color: var(--ink); }
+  .state-code { grid-row: span 2; font: 800 2.6rem/1 var(--display); color: var(--water); }
+  .state-name { font: 700 1.35rem/1.1 var(--display); text-transform: uppercase; }
+  .state-stats { font-size: 0.88rem; color: var(--muted); }
+  .hot { color: #b00020; font-weight: 700; }
+
+  .records { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--rule); border-radius: 6px; counter-reset: rec; }
+  .records li { display: grid; grid-template-columns: 2rem 1fr auto; gap: 0.1rem 0.75rem; padding: 0.8rem 1rem; counter-increment: rec; }
+  .records li + li { border-top: 1px solid var(--rule); }
+  .records li::before { content: counter(rec); grid-row: span 2; font: 800 1.5rem/1 var(--display); color: var(--muted); }
+  .records .rec-num { font: 800 1.4rem/1 var(--display); text-align: right; }
+  .records .small { grid-column: 2 / -1; }
+
+  .explain > p { max-width: 44rem; }
+  .cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 0.6rem; margin: 1rem 0; }
+  .cats div { padding: 0.8rem 1rem; background: var(--card); border-left: 6px solid var(--cat); border-radius: 6px; }
+  .cats dt { font-weight: 700; }
+  .cats dd { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--muted); }
 </style>

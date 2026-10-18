@@ -1,3 +1,5 @@
+import { STATES } from './config.ts';
+
 // NWPS da zonas POSIX viejas; Intl prefiere las IANA.
 const TZ_ALIASES: Record<string, string> = {
   EST5EDT: 'America/New_York',
@@ -9,7 +11,34 @@ const TZ_ALIASES: Record<string, string> = {
   HST10: 'Pacific/Honolulu',
 };
 
-export const ianaZone = (tz: string | null | undefined) => (tz && TZ_ALIASES[tz]) || tz || 'America/New_York';
+// Zonas que NWPS manda pero no son confiables: GMT0GMT y EST5CDT aparecen en medidores
+// del este (PA, NC), y algunos traen basura como "1234". Para esas usamos la zona del estado.
+const UNRELIABLE = new Set(['GMT0GMT', 'EST5CDT']);
+
+const validZones = new Map<string, boolean>();
+function isValidZone(tz: string): boolean {
+  let ok = validZones.get(tz);
+  if (ok === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    validZones.set(tz, ok);
+  }
+  return ok;
+}
+
+// Devuelve siempre una zona IANA válida para Intl: alias conocido → zona IANA del dato →
+// zona del estado → UTC. Así ninguna página se cae por una zona rara.
+export function ianaZone(tz: string | null | undefined, stateCode?: string | null): string {
+  const raw = tz?.trim();
+  if (raw && TZ_ALIASES[raw]) return TZ_ALIASES[raw];
+  if (raw && !UNRELIABLE.has(raw) && raw.includes('/') && isValidZone(raw)) return raw;
+  const fallback = STATES.find((s) => s.code === stateCode?.toUpperCase())?.timeZone;
+  return fallback ?? 'UTC';
+}
 
 export function fmtTime(d: Date | null | undefined, tz: string, withDay = false): string {
   if (!d) return '—';

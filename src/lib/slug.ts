@@ -21,3 +21,8 @@ export function gaugeSlug(name: string, id: string): string {
   const base = place ? `${slugify(river)}-at-${slugify(place)}` : slugify(river);
   return `${base}-${id.toLowerCase()}`;
 }
+
+// Quita la referencia de datum que NWPS mete en algunos nombres: "Delaware River at X (IN MLLW)" → "...at X".
+export function cleanName<T extends string | null | undefined>(s: T): T {
+  return (s == null ? s : s.replace(/\s*\((?:in\s+)?(?:MLLW|MHHW|NAVD\s*88|NGVD\s*29)\)\s*/gi, ' ').replace(/\s{2,}/g, ' ').trim()) as T;
+}

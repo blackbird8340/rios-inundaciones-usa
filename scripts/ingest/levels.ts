@@ -1,7 +1,7 @@
 // Cada 15 min: nivel actual de todos los medidores (1 llamada NWPS por estado).
 // Si NWPS falla para un estado, usa USGS latest-continuous para los medidores con usgs_id.
 // Uso: npm run ingest:levels [-- --state PA]
-import { db } from '../../src/lib/db.ts';
+import { db, withDeadlockRetry } from '../../src/lib/db.ts';
 import { fetchJson, usgsHeaders } from '../../src/lib/http.ts';
 import { USGS_OGC_BASE, type StateConfig } from '../../src/lib/config.ts';
 import { runJob, selectedStates } from '../lib/run.ts';
@@ -27,9 +27,9 @@ runJob('levels', async () => {
         failedStates++;
       }
     }
-    await recomputeDerived(gauges.map((g) => g.id));
+    await withDeadlockRetry(() => recomputeDerived(gauges.map((g) => g.id)));
   }
-  await pruneObservations();
+  await withDeadlockRetry(() => pruneObservations());
   if (failedStates) throw new Error(`${failedStates} states without data. ${notes.join(', ')}`);
   return notes.join(', ');
 });
@@ -44,7 +44,7 @@ async function fromNwps(state: StateConfig, gauges: any[]): Promise<number> {
     if (!id || stage == null || !o.validTime || o.validTime.startsWith('0001')) continue;
     rows.push([id, new Date(o.validTime), stage, toCfs(o.secondary, o.secondaryUnit), 'nwps']);
   }
-  await insertObservations(rows);
+  await withDeadlockRetry(() => insertObservations(rows));
   return rows.length;
 }
 
@@ -66,6 +66,6 @@ async function fromUsgs(state: StateConfig, gauges: any[]): Promise<number> {
     const flow = Number(flows.get(usgsId)?.value);
     rows.push([id, new Date(p.time), stage, Number.isFinite(flow) ? flow : null, 'usgs']);
   }
-  await insertObservations(rows);
+  await withDeadlockRetry(() => insertObservations(rows));
   return rows.length;
 }

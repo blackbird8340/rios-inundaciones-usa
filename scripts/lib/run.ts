@@ -1,4 +1,4 @@
-import { closeDb, db } from '../../src/lib/db.ts';
+import { closeDb, db, withDeadlockRetry } from '../../src/lib/db.ts';
 import { STATES, type StateConfig } from '../../src/lib/config.ts';
 
 // Envuelve un job: registra la corrida en ingest_runs y sale con código 1 si falla.
@@ -31,6 +31,7 @@ export function selectedStates(): StateConfig[] {
 }
 
 // Ejecuta fn sobre items con concurrencia limitada; los errores por item se juntan sin cortar el resto.
+// Un deadlock de la base se reintenta (fn tiene que ser idempotente).
 export async function pool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>) {
   const errors: { item: T; err: unknown }[] = [];
   let i = 0;
@@ -39,7 +40,7 @@ export async function pool<T>(items: T[], concurrency: number, fn: (item: T) => 
       while (i < items.length) {
         const item = items[i++];
         try {
-          await fn(item);
+          await withDeadlockRetry(() => fn(item));
         } catch (err) {
           errors.push({ item, err });
         }

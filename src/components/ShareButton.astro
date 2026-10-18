@@ -1,0 +1,36 @@
+---
+interface Props { url: string; text: string }
+const { url, text } = Astro.props;
+const wa = `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`;
+const x = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+---
+<div class="share" data-url={url} data-text={text}>
+  <button type="button" class="share-btn">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.4a3 3 0 0 0 0-1.6l6.7-3.4A3 3 0 1 0 15 7l-6.7 3.4a3 3 0 1 0 0 3.2L15 17a3 3 0 1 0 3-1Z"/></svg>
+    Share
+  </button>
+  <a class="share-link" href={wa} target="_blank" rel="noopener">WhatsApp</a>
+  <a class="share-link" href={x} target="_blank" rel="noopener">X</a>
+  <span class="share-msg small muted" aria-live="polite"></span>
+</div>
+<script>
+  for (const el of document.querySelectorAll<HTMLElement>('.share')) {
+    const btn = el.querySelector('button')!;
+    const msg = el.querySelector<HTMLElement>('.share-msg')!;
+    btn.addEventListener('click', async () => {
+      const { url, text } = el.dataset as { url: string; text: string };
+      if (navigator.share) {
+        try { await navigator.share({ title: document.title, text, url }); } catch { /* cancelado */ }
+        return;
+      }
+      try { await navigator.clipboard.writeText(url); msg.textContent = 'Link copied.'; }
+      catch { msg.textContent = url; }
+    });
+  }
+</script>
+<style>
+  .share { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 1rem; }
+  .share-btn { display: inline-flex; align-items: center; gap: 0.4rem; font: 600 0.9rem var(--body); padding: 0.55rem 0.9rem; border: 2px solid var(--ink); border-radius: 6px; background: var(--ink); color: #fff; cursor: pointer; }
+  .share-btn:hover { background: var(--water-deep); border-color: var(--water-deep); }
+  .share-link { font: 600 0.85rem var(--body); padding: 0.5rem 0.75rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); text-decoration: none; }
+</style>
