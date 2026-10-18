@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 import { db } from '../../lib/db.ts';
+import { gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, type FloodStatus } from '../../lib/flood.ts';
 import { fmtTime, ianaZone } from '../../lib/format.ts';
 import { cleanName } from '../../lib/slug.ts';
@@ -26,7 +27,10 @@ export const GET: APIRoute = async ({ params }) => {
     'SELECT slug, name, state_code, stage_ft, status, observed_at, time_zone, minor_ft FROM gauges WHERE slug = ?',
     [params.slug ?? ""],
   );
-  if (!g) return new Response('Not found', { status: 404 });
+  if (!g) {
+    const to = await gaugeRedirect(params.slug ?? '');
+    return to ? new Response(null, { status: 301, headers: { Location: `/og/${to}.png` } }) : new Response('Not found', { status: 404 });
+  }
   g.name = cleanName(g.name);
   const key = `${g.slug}|${g.observed_at?.getTime() ?? 0}`;
   let png = cache.get(key);
@@ -41,7 +45,7 @@ export const GET: APIRoute = async ({ params }) => {
     const tree = h('div', { width: 1200, height: 630, display: 'flex', flexDirection: 'column', background: '#eef2f3', fontFamily: 'PS', color: '#10243a', position: 'relative' }, [
       h('div', { display: 'flex', alignItems: 'center', gap: 18, padding: '48px 64px 0' }, [
         { type: 'img', props: { src: mark, width: 64, height: 64 } },
-        h('div', { fontFamily: 'BSD', fontSize: 40, letterSpacing: 2 }, (process.env.SITE_NAME || 'River Levels').toUpperCase()),
+        h('div', { fontFamily: 'BSD', fontSize: 40, letterSpacing: 2 }, (process.env.SITE_NAME || 'Current Floods').toUpperCase()),
       ]),
       h('div', { display: 'flex', flexDirection: 'column', padding: '28px 64px 0' }, [
         h('div', { fontFamily: 'BSD', fontSize: g.name.length > 40 ? 64 : 78, lineHeight: 1, textTransform: 'uppercase' }, `${g.name}, ${g.state_code}`),

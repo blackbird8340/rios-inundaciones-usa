@@ -5,13 +5,17 @@ import StageChart from '../../components/StageChart.astro';
 import ImpactSlider from '../../components/ImpactSlider.astro';
 import ShareButton from '../../components/ShareButton.astro';
 import { forecastSentence } from '../../lib/insights.ts';
-import { getGaugePage } from '../../lib/queries.ts';
+import { getGaugePage, gaugeRedirect } from '../../lib/queries.ts';
 import { STATUS_META, statusFor, type FloodStatus } from '../../lib/flood.ts';
 import { ago, cfs, fmtDate, fmtTime, ft, ianaZone } from '../../lib/format.ts';
 import { STALE_AFTER_MIN } from '../../lib/config.ts';
 
 const data = await getGaugePage(Astro.params.slug!);
-if (!data) return new Response('Gauge not found', { status: 404 });
+if (!data) {
+  const to = await gaugeRedirect(Astro.params.slug!);
+  if (to) return Astro.redirect(`/gauge/${to}/`, 301);
+  return new Response(null, { status: 404 });
+}
 const { gauge: g, impacts, crests, observations, forecast, alerts, alertsCheckedAt, upstream, downstream, lastObservation } = data;
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
@@ -50,13 +54,13 @@ const nwsUrl = g.lid ? `https://water.noaa.gov/gauges/${g.lid.toLowerCase()}` : 
 const usgsUrl = g.usgs_id ? `https://waterdata.usgs.gov/monitoring-location/${g.usgs_id}/` : null;
 const vsRecord = stage != null && record ? record.stage_ft - stage : null;
 
+const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
 const forecastText = forecastSentence(stage, observedAt, forecast, cats, tz);
 const recordText = vsRecord != null && record
   ? vsRecord >= 0
     ? `${vsRecord.toFixed(1)} ft below the record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
     : `${(-vsRecord).toFixed(1)} ft above the previous record crest of ${new Date(record.occurred_at).getUTCFullYear()} (${ft(record.stage_ft)}).`
   : null;
-const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
 const shareText = stage != null ? `${g.name}, ${g.state_code}: ${ft(stage, 1)} (${STATUS_META[status].label.toLowerCase()})` : `${g.name}, ${g.state_code} river level`;
 const title = `${g.name}, ${g.state_code} River Level Today – Flood Stage & Forecast`;
 const description = stage != null
@@ -68,11 +72,25 @@ const crumbs = [
   ...(g.river_slug ? [{ name: river, href: `/river/${g.river_slug}/` }] : []),
   { name: g.place_name ?? g.name, href: path },
 ];
-const jsonLd = [{
-  '@context': 'https://schema.org',
-  '@type': 'BreadcrumbList',
-  itemListElement: crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: c.href })),
-}];
+const recYear = record ? new Date(record.occurred_at).getUTCFullYear() : null;
+const faqs: [string, string][] = [];
+if (g.minor_ft != null) faqs.push([`What is the flood stage of the ${g.name}?`, `The National Weather Service flood stage at this gauge is ${ft(g.minor_ft)}.${g.action_ft != null ? ` Action stage is ${ft(g.action_ft)}` : ''}${g.moderate_ft != null ? `, moderate flood stage ${ft(g.moderate_ft)}` : ''}${g.major_ft != null ? ` and major flood stage ${ft(g.major_ft)}` : ''}${g.action_ft != null || g.moderate_ft != null || g.major_ft != null ? '.' : ''}`]);
+faqs.push([`Is the ${g.name} flooding today?`, stage == null || status === 'no_data'
+  ? 'There is no recent reading from this gauge, so we cannot say. Check weather.gov for official information.'
+  : `${['minor', 'moderate', 'major'].includes(status) ? 'Yes' : 'No'}. At the latest reading${observedAt ? ` (${fmtTime(observedAt, tz, true)})` : ''} the river was at ${ft(stage, 1)}, which is ${STATUS_META[status].label.toLowerCase()}.`]);
+if (record && recYear) faqs.push([`What is the record crest at ${g.place_name ?? g.name}?`, `The highest crest on record is ${ft(record.stage_ft)}, on ${fmtDate(record.occurred_at)}${record.preliminary ? ' (preliminary)' : ''}.`]);
+if (forecastText) faqs.push([`What is the forecast for the ${g.name}?`, `${forecastText} Forecast issued by the NWS${fcIssued ? ` ${fmtTime(fcIssued, tz, true)}` : ''}.`]);
+const jsonLd = [
+  { '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+    itemListElement: crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: origin + c.href })) },
+  { '@context': 'https://schema.org', '@type': 'Dataset', name: `${g.name}, ${g.state_code}: river stage and flood categories`,
+    description: `Observed river stage (last 7 days), NWS flood categories${g.has_forecast ? ', NWS forecast' : ''} and historic crests for the ${g.name} gauge.`,
+    url: origin + path, isAccessibleForFree: true,
+    spatialCoverage: { '@type': 'Place', name: `${g.place_name ?? g.name}, ${g.state_name}`, geo: { '@type': 'GeoCoordinates', latitude: Number(g.lat), longitude: Number(g.lon) } },
+    creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey', url: 'https://www.usgs.gov/' }, { '@type': 'Organization', name: 'NOAA National Weather Service', url: 'https://www.weather.gov/' }],
+    ...(observedAt ? { dateModified: observedAt.toISOString() } : {}) },
+  { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: faqs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })) },
+];
 ---
 <Base title={title} description={description} canonicalPath={path} jsonLd={jsonLd} noindex={minutesOld > 30 * 1440} ogImage={`/og/${g.slug}.png`}>
   <ol class="crumbs" slot="crumbs">
@@ -196,9 +214,20 @@ const jsonLd = [{
       </section>
     </aside>
   </div>
+
+  <section class="faq" aria-labelledby="faq-h">
+    <h2 id="faq-h">Questions about this gauge</h2>
+    {faqs.map(([q, a]) => <details><summary>{q}</summary><p>{a}</p></details>)}
+    <p class="small muted">How we calculate this: <a href="/methodology/">methodology</a> · <a href="/sources/">sources</a>.</p>
+  </section>
 </Base>
 
 <style>
+  .faq { margin-top: 2.5rem; }
+  .faq h2 { margin-bottom: 0.75rem; }
+  .faq details { background: var(--card); border: 1px solid var(--rule); border-radius: 8px; margin-bottom: 0.5rem; }
+  .faq summary { cursor: pointer; padding: 0.8rem 1rem; font-weight: 600; }
+  .faq details p { padding: 0 1rem 0.9rem; color: var(--muted); }
   .fc-line { margin-top: 0.6rem; font-size: 1.05rem; }
   .rec-line { margin-top: 0.3rem; }
   .slider-wrap { margin-block: 1.5rem; }

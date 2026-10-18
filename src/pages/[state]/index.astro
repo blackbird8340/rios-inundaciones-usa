@@ -3,11 +3,17 @@ import Base from '../../layouts/Base.astro';
 import AreaPage from '../../components/AreaPage.astro';
 import { getStatePage } from '../../lib/queries.ts';
 const data = await getStatePage(Astro.params.state!);
-if (!data) return new Response('Not found', { status: 404 });
+if (!data) return new Response(null, { status: 404 });
 const { state, gauges } = data;
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 const path = `/${state.slug}/`;
-const jsonLd = [{ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: state.name, item: path }] }];
+const origin = process.env.SITE_DOMAIN ? `https://${process.env.SITE_DOMAIN}` : Astro.url.origin;
+const jsonLd = [
+  { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: state.name, item: origin + path }] },
+  { '@context': 'https://schema.org', '@type': 'Dataset', name: `${state.name} river levels and flood stages`, url: origin + path, isAccessibleForFree: true,
+    description: `Current stage and NWS flood category for ${gauges.length} river gauges in ${state.name}.`, spatialCoverage: state.name,
+    creator: [{ '@type': 'Organization', name: 'U.S. Geological Survey' }, { '@type': 'Organization', name: 'NOAA National Weather Service' }] },
+];
 ---
 <Base title={`${state.name} River Levels Today – Flood Stages & Forecasts`} description={`Live river levels for ${gauges.length} gauges in ${state.name}: which rivers are at action stage or flooding now, by river.`} canonicalPath={path} jsonLd={jsonLd}>
   <ol class="crumbs" slot="crumbs"><li><a href={path}>{state.name}</a></li></ol>

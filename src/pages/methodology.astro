@@ -1,0 +1,18 @@
+---
+import Prose from '../components/Prose.astro';
+---
+<Prose title="Methodology: how we calculate river status" description="How we read gauges, assign flood categories, compute trends, rising rivers and forecasts." path="/methodology/" heading="Methodology">
+  <h2>Updates</h2>
+  <p>We fetch new readings every 30 minutes (river levels, NWS alerts and forecasts) and refresh gauge metadata once a day. Most gauges report every 15 to 60 minutes. Each page shows the time of the latest reading in the gauge's local time zone; readings older than 2 hours are flagged as possibly out of date.</p>
+  <h2>Flood categories</h2>
+  <p>Each gauge has its own thresholds set by the National Weather Service: action stage, minor (flood stage), moderate and major. We compare the latest reading with those thresholds. If a gauge has no recent reading, it shows as "No recent data".</p>
+  <h2>Trend</h2>
+  <p>Rising, falling or steady compares the latest reading with the one about 3 hours earlier. Changes smaller than 0.1 ft count as steady.</p>
+  <h2>Rising fastest</h2>
+  <p>We compare each gauge's latest reading (only if it is less than 3 hours old) with the reading closest to 24 hours earlier, taken between 22 and 26 hours before. Gauges without a reading in that window are left out.</p>
+  <p>Reservoir, lake-pool, tidal and estuary gauges are excluded, because dam operations, tides and wind move them regardless of river flow. We identify them from the USGS site type (lake/reservoir, estuary, ocean, tidal stream) and, when USGS has no type, from the gauge name (for example "MLLW" datum, "Sound", "Lake", "Reservoir", "Pool") or a pool elevation above 300 ft. We also mark a gauge as tidal when its readings change direction at least 24 times in 7 days (about two cycles a day). Some wind-driven estuary gauges can still slip through.</p>
+  <h2>Forecast sentence</h2>
+  <p>We summarize the NWS forecast: the highest (or lowest) forecast level after now, when it is expected, and whether it would reach or stay below the next flood category. The forecast itself is unchanged from the NWS.</p>
+  <h2>Record crests</h2>
+  <p>Record crests are the historic crests published by the NWS for each gauge; some are marked preliminary.</p>
+</Prose>

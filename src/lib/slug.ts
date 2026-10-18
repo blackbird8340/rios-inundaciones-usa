@@ -17,7 +17,7 @@ export function splitGaugeName(name: string): { river: string; place: string | n
 }
 
 export function gaugeSlug(name: string, id: string): string {
-  const { river, place } = splitGaugeName(name);
+  const { river, place } = splitGaugeName(cleanName(name));
   const base = place ? `${slugify(river)}-at-${slugify(place)}` : slugify(river);
   return `${base}-${id.toLowerCase()}`;
 }
@@ -25,4 +25,10 @@ export function gaugeSlug(name: string, id: string): string {
 // Quita la referencia de datum que NWPS mete en algunos nombres: "Delaware River at X (IN MLLW)" → "...at X".
 export function cleanName<T extends string | null | undefined>(s: T): T {
   return (s == null ? s : s.replace(/\s*\((?:in\s+)?(?:MLLW|MHHW|NAVD\s*88|NGVD\s*29)\)\s*/gi, ' ').replace(/\s{2,}/g, ' ').trim()) as T;
+}
+
+// Slug viejo con el datum ("...-in-mllw-bdsp1") → slug limpio, para redirigir con 301.
+export function legacySlugTarget(slug: string): string | null {
+  const clean = slug.replace(/-in-(?:mllw|mhhw|navd-?88|ngvd-?29)(?=-)/g, '');
+  return clean !== slug ? clean : null;
 }

@@ -91,3 +91,6 @@ p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.foot-nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; }
+.foot-nav a { color: var(--ink); }

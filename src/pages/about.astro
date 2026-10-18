@@ -1,0 +1,18 @@
+---
+import Prose from '../components/Prose.astro';
+const site = process.env.SITE_NAME || 'Current Floods';
+---
+<Prose title={`About ${site}`} description={`What ${site} is, who it is for and how to use it.`} path="/about/" heading={`About ${site}`}>
+  <p>{site} shows current river levels and National Weather Service flood stages in plain language, so anyone can answer one question quickly: is my river flooding, or about to?</p>
+  <h2>What you'll find</h2>
+  <ul>
+    <li>The latest reading at each river gauge, its NWS flood category and whether it is rising or falling.</li>
+    <li>What floods at each level, from NWS impact statements, with a slider to explore them.</li>
+    <li>The NWS forecast in a sentence, the record crest and the last 7 days of readings.</li>
+    <li>Pages by state and by river, a map with NWS flood alert areas and radar, and a list of rivers rising fastest.</li>
+  </ul>
+  <h2>Coverage</h2>
+  <p>Today we cover Pennsylvania and North Carolina. More states will be added one at a time.</p>
+  <h2>Independence</h2>
+  <p>{site} is independent and is not affiliated with USGS, NOAA or the National Weather Service. All numbers on the site come from their public data; see <a href="/sources/">sources</a> and <a href="/methodology/">methodology</a>.</p>
+</Prose>
